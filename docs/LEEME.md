@@ -1,0 +1,4 @@
+# Documentación
+
+- `contexto/` → **diseño fijo**: protocolo, contexto, arquitectura, plan, método y modelo de datos. Es el contexto del proyecto de Claude. Solo cambia si se modifica el diseño (y entonces hay que avisar y registrarlo en `estado/progreso.md`).
+- `estado/` → **estado vivo**: `progreso.md` (dónde estamos y trabajo en curso) y `bitacora.md` (una entrada por sesión). Cada chat lo lee al empezar y lo actualiza al trabajar.
