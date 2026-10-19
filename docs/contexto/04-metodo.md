@@ -16,7 +16,7 @@ Principio: **la IA escribe el código; Sergio dirige, lee, entiende y depura.** 
 1. **Romper algo a propósito** (lista en `docs/contexto/03-plan-fases.md`) y leer el error.
 2. **Preguntas de repaso**: Claude hace 3 preguntas y da feedback a las respuestas.
 3. **Actualizar `docs/estado/progreso.md`**: fase completada, decisiones, aprendizajes y pendientes.
-4. **Commit** con un mensaje claro en inglés (p. ej. `feat: agent loop with mock tools`).
+4. **Pull Request** de la rama de la fase, revisado y fusionado por Sergio (ver "Flujo Git" en `docs/contexto/00-instrucciones-proyecto.md`).
 
 ## Coordinación entre chats
 

@@ -1,6 +1,6 @@
 # Plan por fases
 
-Cada fase termina con algo que funciona, una explicación de Sergio, `docs/estado/progreso.md` actualizado y un commit.
+Cada fase se hace en su propia rama y termina con algo que funciona, una explicación de Sergio, `docs/estado/progreso.md` actualizado y un Pull Request fusionado en `main`.
 
 ---
 
@@ -98,7 +98,7 @@ Cada fase termina con algo que funciona, una explicación de Sergio, `docs/estad
 
 - `README.md` como caso de cliente: problema, proceso actual, solución, diagrama, impacto, limitaciones y roadmap (ver `docs/contexto/01-contexto.md`).
 - Vídeo de demo de 1-2 minutos.
-- Repo público (revisando antes que no haya secretos en el historial).
+- Repo público (decidido): antes de cambiar la visibilidad, revisar que no haya secretos en el historial (`git log -p`, buscar claves) y que los commits usen el email noreply.
 - Texto para publicar el proyecto.
 - Ensayo: contar el proyecto en 2 minutos y responder las preguntas de repaso de todas las fases.
 
@@ -108,5 +108,5 @@ Cada fase termina con algo que funciona, una explicación de Sergio, `docs/estad
 
 - Llamada de voz con un proveedor de voz (normalmente de pago).
 - Panel sencillo con métricas del log (envíos gestionados, % escalados).
-- Tests automáticos de las herramientas.
+- Tests automáticos de las herramientas con `pytest`, ejecutados en cada Pull Request con GitHub Actions.
 - Usar Claude como LLM en lugar de Gemini y comparar.

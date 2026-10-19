@@ -42,7 +42,7 @@ Hay un **chat principal** (fuera de este proyecto) donde Sergio planifica, decid
 1. "Romper algo a propósito" (lista en `docs/contexto/03-plan-fases.md`) y leer el error juntos.
 2. Hacer 3 preguntas de repaso y dar feedback.
 3. Actualizar `docs/estado/progreso.md`: marcar la fase, vaciar "Trabajo en curso", añadir aprendizajes con las palabras de Sergio y pendientes.
-4. Dar el comando de commit con un mensaje en inglés.
+4. Cerrar la rama de la fase con su Pull Request (ver "Flujo Git").
 
 ### 5. Antes de terminar el chat (siempre, aunque la fase no esté acabada)
 1. Deja "Trabajo en curso" reflejando el estado real: qué está hecho, qué está a medias y cuál es el siguiente paso.
@@ -50,6 +50,16 @@ Hay un **chat principal** (fuera de este proyecto) donde Sergio planifica, decid
 3. Si hay cambios sin commit, recuérdaselo a Sergio con el comando.
 
 Si Sergio dice que se tiene que ir o que cierra, ejecuta el paso 5 antes de despedirte.
+
+---
+
+## Flujo Git (una rama y un Pull Request por fase)
+
+- **Al empezar una fase:** desde `main` actualizado, crear la rama `fase-N-nombre-corto` (p. ej. `fase-1-llm`): `git switch main`, `git pull`, `git switch -c fase-1-llm`.
+- **Durante la fase:** commits pequeños en esa rama, con mensajes en inglés (`feat: …`, `fix: …`, `docs: …`).
+- **Al cerrar la fase:** `git push -u origin <rama>`, abrir el Pull Request en GitHub con una descripción breve (qué se hizo, cómo probarlo, decisiones y qué se aprendió), Sergio lo revisa en la pestaña "Files changed" y lo fusiona (merge). Después: `git switch main` y `git pull`.
+- Explica a Sergio cada paso la primera vez (rama, PR, merge) y por qué se trabaja así en equipos reales.
+- Nunca commits directos a `main` a partir de la fase 1.
 
 ---
 
