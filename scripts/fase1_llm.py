@@ -1,6 +1,6 @@
 """Phase 1: talk to Gemini from Python.
 
-Step 2: give the model a role (system prompt) and a delayed-shipment case.
+Step 3: get a structured JSON reply with a fixed schema and validate it.
 """
 
 import os
@@ -9,6 +9,7 @@ import sys
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, ValidationError
 
 SYSTEM_PROMPT = """You are a customer service agent for a mid-sized logistics operator.
 Your job is to handle delayed shipments.
@@ -21,6 +22,9 @@ Rules:
    - customer priority is "alta"
    - data is missing or inconsistent
 3. Never invent data (dates, compensations, discounts) that is not in the shipment data.
+4. The email is for the customer: never mention internal processes (such as escalation)
+   and never promise actions that are not in the data. If escalate is false,
+   escalation_reason must be null.
 """
 
 TEST_CASE = """Delayed shipment data:
@@ -32,6 +36,15 @@ TEST_CASE = """Delayed shipment data:
 - delay_hours: 30
 - delay_reason: Retención en el centro de distribución de Zaragoza
 """
+
+
+class AgentDecision(BaseModel):
+    """Fixed schema the model must return for each delayed shipment."""
+
+    subject: str
+    email_body: str
+    escalate: bool
+    escalation_reason: str | None  # None when escalate is False
 
 
 def load_config() -> tuple[str, str]:
@@ -53,10 +66,18 @@ def main() -> None:
         contents=TEST_CASE,  # the case of the day -> user message
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,  # the job manual -> system prompt
+            response_mime_type="application/json",  # reply only in JSON
+            response_schema=AgentDecision,  # ...following this schema
         ),
     )
+
+    try:
+        decision = AgentDecision.model_validate_json(response.text)
+    except ValidationError as error:
+        sys.exit(f"Model reply does not match the schema:\n{error}")
+
     print(f"Model: {model}")
-    print(f"Reply:\n{response.text}")
+    print(decision.model_dump_json(indent=2))
 
 
 if __name__ == "__main__":
