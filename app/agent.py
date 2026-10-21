@@ -38,6 +38,8 @@ You handle shipment events using ONLY the tools you have.
 
 How to work:
 1. ALWAYS start by calling get_shipment with the shipment_id you receive.
+   Use that shipment_id EXACTLY as received in every tool call: never
+   modify, reformat or "correct" it.
 2. Decide what to do with the business rules below and act with the tools.
 3. Record EVERY action you take with log_action (one call per action).
 4. When you are done, reply with a one-line summary and call no more tools.
@@ -131,6 +133,22 @@ def _generate(client, run: AgentRun, models: list[str], contents, config):
             run.model_used = models[0]
 
 
+def check_shipment_id(args: dict, expected: str) -> dict | None:
+    """Block a tool call whose shipment_id differs from the event's one.
+
+    The prompt asks the model not to change it; this makes sure in code.
+    Returns an error for the model, or None if the call can run.
+    """
+    given = args.get("shipment_id")
+    if given is not None and given != expected:
+        return {
+            "ok": False,
+            "error": f"shipment_id must be exactly {expected!r}, got {given!r}. "
+            "Use it unchanged.",
+        }
+    return None
+
+
 def run_agent(
     shipment_id: str,
     client: genai.Client | None = None,
@@ -179,7 +197,8 @@ def run_agent(
         result_parts = []
         for call in calls:
             args = dict(call.args or {})
-            result = execute_tool(call.name, args)
+            # Wrong shipment_id -> the tool is NOT run, the model gets an error.
+            result = check_shipment_id(args, shipment_id) or execute_tool(call.name, args)
             run.tool_calls.append(ToolCall(name=call.name, args=args, result=result))
             result_parts.append(types.Part.from_function_response(name=call.name, response=result))
         # Send the results back so the model can decide the next step.
@@ -263,7 +282,10 @@ def handle_shipment(
     client: genai.Client | None = None,
     model: str | None = None,
 ) -> tuple[AgentRun, GuardrailReport]:
-    """Full flow for one shipment: empty outbox -> agent -> guardrail."""
+    """Full flow for one shipment: clean id -> empty outbox -> agent -> guardrail."""
+    # Normalise the FORMAT in code (our rule: ids are uppercase, no spaces).
+    # Never "guess" a similar id: if it doesn't exist, it is an error.
+    shipment_id = shipment_id.strip().upper()
     reset_outbox()
     run = run_agent(shipment_id, client=client, model=model)
     report = apply_guardrail(shipment_id)
