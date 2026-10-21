@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from google import genai
 from google.genai import errors, types
 
-from app.config import load_config, load_fallback_model
+from app.config import load_config, load_fallback_models
 from app.rules import Expected, evaluate
 from app.tools import (
     ACTION_LOG,
@@ -106,19 +106,25 @@ def execute_tool(name: str, args: dict) -> dict:
         return {"ok": False, "error": f"tool {name} failed: {type(error).__name__}: {error}"}
 
 
-def _generate(client, run: AgentRun, models: list[str], contents, config):
-    """Call Gemini; on a 5xx switch to the next model and keep it for this run.
+def _should_switch_model(error: errors.APIError) -> bool:
+    """5xx = Google's side (overloaded). 429 = quota, which is PER MODEL.
 
-    4xx errors are ours (bad request, bad key...): another model won't fix
-    them, so they are raised as they are.
+    Any other 4xx is our fault (bad request, bad key...): another model
+    won't fix it, so we don't switch.
     """
+    return isinstance(error, errors.ServerError) or error.code == 429
+
+
+def _generate(client, run: AgentRun, models: list[str], contents, config):
+    """Call Gemini; if the model is overloaded or out of quota, move to the
+    next one in the list and keep it for the rest of this run."""
     while True:
         try:
             return client.models.generate_content(
                 model=models[0], contents=contents, config=config
             )
-        except errors.ServerError as error:
-            if len(models) == 1:
+        except errors.APIError as error:
+            if not _should_switch_model(error) or len(models) == 1:
                 raise
             print(f"[FALLBACK] {models[0]} failed ({error.code}), switching to {models[1]}")
             models.pop(0)  # the backup becomes the model for the rest of the run
@@ -129,15 +135,16 @@ def run_agent(
     shipment_id: str,
     client: genai.Client | None = None,
     model: str | None = None,
-    fallback_model: str | None = None,
+    fallback_models: list[str] | None = None,
 ) -> AgentRun:
     """Handle one shipment event with the agent loop."""
     if client is None or model is None:
         api_key, model = load_config()
         client = genai.Client(api_key=api_key)
-    if fallback_model is None:
-        fallback_model = load_fallback_model()
-    models = [model] + ([fallback_model] if fallback_model and fallback_model != model else [])
+    if fallback_models is None:
+        fallback_models = load_fallback_models()
+    # Main model first, then the backups (without repeating the main one).
+    models = [model] + [name for name in fallback_models if name != model]
 
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,

@@ -47,8 +47,10 @@ Todo es gratuito. Limitaciones conocidas: Render gratuito se "duerme" tras ~15 m
 Agente-logistica/
 ├── app/
 │   ├── main.py            # API FastAPI (endpoints)
-│   ├── agent.py           # Bucle del agente y prompt del sistema
+│   ├── agent.py           # Bucle del agente, prompt del sistema y guardarraíl
 │   ├── tools.py           # Definición de las herramientas
+│   ├── rules.py           # Reglas de negocio en código (única fuente de verdad; las usa el guardarraíl)
+│   ├── mock_data.py       # Datos inventados en memoria (fase 2; en fase 3 los sustituye sheets.py)
 │   ├── integrations/
 │   │   ├── sheets.py      # Google Sheets
 │   │   ├── email.py       # Resend
@@ -70,6 +72,7 @@ Agente-logistica/
 
 - **Google Sheets como "sistema del cliente":** gratis, visible y editable a mano para la demo; además obliga a hacer una integración real con API y autenticación.
 - **Reglas de negocio en el prompt + herramientas pequeñas:** el LLM decide, pero cada acción pasa por una función controlada. Es el patrón habitual en agentes empresariales.
+- **El LLM decide, el código verifica (guardarraíl):** al terminar el agente, `rules.py` dice qué debía pasar y se compara con lo que hizo. Si faltó un escalado, lo hace el código; si escaló de más, solo se registra (acción `guardrail` en el log).
 - **Escalado a humano (human-in-the-loop):** en procesos reales el agente no lo resuelve todo; saber cuándo escalar es parte del diseño.
 - **Token secreto en el webhook:** la API es pública; sin él cualquiera podría disparar el agente.
 - **Registro de cada acción:** trazabilidad y auditoría, imprescindibles para que un cliente confíe en el agente.

@@ -16,7 +16,11 @@ def load_config() -> tuple[str, str]:
     return api_key, model
 
 
-def load_fallback_model() -> str | None:
-    """Optional backup model, used only if the main one fails with a 5xx."""
+def load_fallback_models() -> list[str]:
+    """Optional backup models, in order (comma separated in .env).
+
+    Used only if the main model fails with a 5xx (overloaded) or a 429 (quota).
+    """
     load_dotenv()
-    return os.getenv("GEMINI_FALLBACK_MODEL") or None
+    raw = os.getenv("GEMINI_FALLBACK_MODEL", "")
+    return [name.strip() for name in raw.split(",") if name.strip()]
