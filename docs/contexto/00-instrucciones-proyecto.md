@@ -47,7 +47,8 @@ Hay un **chat principal** (fuera de este proyecto) donde Sergio planifica, decid
 ### 5. Antes de terminar el chat (siempre, aunque la fase no esté acabada)
 1. Deja "Trabajo en curso" reflejando el estado real: qué está hecho, qué está a medias y cuál es el siguiente paso.
 2. Añade una entrada a `docs/estado/bitacora.md` con el formato indicado allí.
-3. Si hay cambios sin commit, recuérdaselo a Sergio con el comando.
+3. Si en la sesión algo de **la forma de trabajar** ha ido especialmente bien o mal (no del código), añade una línea a `docs/estado/lecciones.md` con su formato.
+4. Si hay cambios sin commit, recuérdaselo a Sergio con el comando.
 
 Si Sergio dice que se tiene que ir o que cierra, ejecuta el paso 5 antes de despedirte.
 
