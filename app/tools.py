@@ -14,7 +14,11 @@ from datetime import datetime, timezone
 
 from app.mock_data import CUSTOMERS, SHIPMENTS
 
+# Actions the AGENT may log (what happened to the shipment).
 VALID_ACTIONS = {"email_sent", "escalated", "no_action", "error"}
+# Action reserved for the guardrail (an observation about the agent).
+# Not offered to the model: the agent must not be able to flag itself.
+GUARDRAIL_ACTION = "guardrail"
 
 # Outbox: everything the agent did during one run.
 SENT_EMAILS: list[dict] = []
@@ -96,6 +100,17 @@ def log_action(shipment_id: str, action: str, reason: str, details: str) -> dict
             "ok": False,
             "error": f"invalid action {action!r}, use one of {sorted(VALID_ACTIONS)}",
         }
+    _append_log(shipment_id, action, reason, details)
+    return {"ok": True}
+
+
+def record_guardrail(shipment_id: str, reason: str, details: str = "") -> None:
+    """Log a guardrail discrepancy. Code only: NOT in TOOLS, the model can't call it."""
+    _append_log(shipment_id, GUARDRAIL_ACTION, reason, details)
+
+
+def _append_log(shipment_id: str, action: str, reason: str, details: str) -> None:
+    """Write one row to the audit log (shared by the agent and the guardrail)."""
     row = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "shipment_id": shipment_id,
@@ -105,7 +120,6 @@ def log_action(shipment_id: str, action: str, reason: str, details: str) -> dict
     }
     ACTION_LOG.append(row)
     print(f"[LOG] {shipment_id} | {action} | {reason}")
-    return {"ok": True}
 
 
 # Name -> function: the agent loop uses it to run the tool the model asks for.

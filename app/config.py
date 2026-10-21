@@ -14,3 +14,9 @@ def load_config() -> tuple[str, str]:
     if not api_key or not model:
         sys.exit("Missing GEMINI_API_KEY or GEMINI_MODEL in .env")
     return api_key, model
+
+
+def load_fallback_model() -> str | None:
+    """Optional backup model, used only if the main one fails with a 5xx."""
+    load_dotenv()
+    return os.getenv("GEMINI_FALLBACK_MODEL") or None

@@ -32,7 +32,7 @@
 |---|---|
 | timestamp | fecha y hora ISO |
 | shipment_id | texto |
-| action | `email_sent` / `escalated` / `no_action` / `error` |
+| action | `email_sent` / `escalated` / `no_action` / `error` / `guardrail` (solo lo escribe el guardarraíl: discrepancia entre lo que hizo el agente y las reglas) |
 | reason | texto (por qué el agente decidió eso) |
 | details | texto |
 
