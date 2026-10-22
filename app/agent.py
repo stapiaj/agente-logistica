@@ -80,8 +80,8 @@ Business rules:
    notify_human, even if no rule in 4 applies (and also if one does).
    Start the message with "JUDGMENT:" and explain why in one or two sentences
    (mention any rule from 4 that also applies). Do NOT send the email: pass
-   it as email_draft (subject + body, same style rules) so a human reviews it
-   first. Ordinary causes (breakdown, traffic, weather, congestion) are NOT
+   it as email_draft ("Subject: ..." line, blank line, body; same style
+   rules) so a human reviews it first. Ordinary causes (breakdown, traffic, weather, congestion) are NOT
    judgment cases: follow rules 3 and 4.
 
 Email style:
@@ -129,7 +129,14 @@ def execute_tool(tools: dict, name: str, args: dict) -> dict:
     try:
         return tool(**args)
     except Exception as error:  # returned to the model as data, like any error
-        return {"ok": False, "error": f"tool {name} failed: {type(error).__name__}: {error}"}
+        # "technical": the tool crashed (e.g. provider down). Not the same as a
+        # validation error (bad input from the model): the guardrail treats it
+        # as a legitimate reason to escalate, not as an agent mistake.
+        return {
+            "ok": False,
+            "error": f"tool {name} failed: {type(error).__name__}: {error}",
+            "technical": True,
+        }
 
 
 def _should_switch_model(error: errors.APIError) -> bool:
@@ -234,8 +241,12 @@ class GuardrailReport:
         return bool(self.corrections or self.discrepancies)
 
 
-def apply_guardrail(shipment_id: str) -> GuardrailReport:
-    """Compare what the agent DID (the outbox) with what rules.py says SHOULD happen."""
+def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailReport:
+    """Compare what the agent DID (the outbox) with what rules.py says SHOULD happen.
+
+    `run` lets us see what the agent TRIED (tool_calls), not only what worked:
+    "didn't try" and "tried but the tool failed" are different things.
+    """
     # 1. What should happen: same facts the agent saw, judged by code (no LLM).
     facts = lookup_shipment(shipment_id)
     expected = evaluate(facts.get("shipment"), facts.get("customer"))
@@ -249,12 +260,19 @@ def apply_guardrail(shipment_id: str) -> GuardrailReport:
     # rules don't cover. rules.py can't predict them, so they are accepted.
     judgment_alerts = [n for n in HUMAN_NOTIFICATIONS if is_judgment(n["message"])]
     judgment = bool(judgment_alerts)
+    # Technical failures: a tool crashed (e.g. email provider down). Not the
+    # agent's fault, and a legitimate reason for the agent to escalate.
+    calls = run.tool_calls if run else []
+    failed_tools = sorted({call.name for call in calls if call.result.get("technical")})
+    technical_failure = bool(failed_tools)
+    for name in failed_tools:  # informative, to measure how often providers fail
+        record_guardrail(shipment_id, f"technical failure in {name} (not an agent error)")
 
     # 3. Compare. Under-escalating is costly -> fix it. Over-escalating is cheap -> record it.
     must_escalate: list[str] = []
     if expected.escalate and not did_escalate:
         must_escalate.append("; ".join(expected.reasons))
-    if did_escalate and not expected.escalate and not judgment:
+    if did_escalate and not expected.escalate and not judgment and not technical_failure:
         report.discrepancies.append("agent escalated but no rule requires it")
     if judgment:
         # Always recorded (not an error): lets us measure how often the agent
@@ -268,8 +286,13 @@ def apply_guardrail(shipment_id: str) -> GuardrailReport:
             report.discrepancies.append("agent emailed the customer despite escalating by judgment")
     # Escalating by judgment replaces the email (the draft goes to the human).
     if expected.send_email and not did_email and not judgment:
-        report.discrepancies.append("agent did not email the customer")
-        must_escalate.append("customer was not emailed, a human must contact them")
+        if "send_customer_email" in failed_tools:
+            # It tried and the provider failed: not a discrepancy, but the
+            # customer still has no notice, so a human must know.
+            must_escalate.append("customer could not be emailed (technical failure)")
+        else:
+            report.discrepancies.append("agent did not email the customer")
+            must_escalate.append("customer was not emailed, a human must contact them")
     if did_email and not expected.send_email:
         report.discrepancies.append("agent emailed the customer but the rules say it should not")
         must_escalate.append("customer was emailed against the rules")
@@ -277,7 +300,10 @@ def apply_guardrail(shipment_id: str) -> GuardrailReport:
     for discrepancy in report.discrepancies:
         record_guardrail(shipment_id, f"guardrail: {discrepancy}")
 
-    if must_escalate:
+    # Only alert if the human doesn't have the case yet: never two alerts for
+    # one shipment. If the agent already escalated, the discrepancies above
+    # are recorded and that's all.
+    if must_escalate and not did_escalate:
         reason = " | ".join(must_escalate)
         deliver_alert(shipment_id, f"[GUARDRAIL] {reason}")
         record_action(shipment_id, "escalated", f"guardrail correction: {reason}",
@@ -314,7 +340,7 @@ def handle_shipment(
     shipment_id = shipment_id.strip().upper()
     reset_outbox()
     run = run_agent(shipment_id, client=client, model=model)
-    report = apply_guardrail(shipment_id)
+    report = apply_guardrail(shipment_id, run)
     return run, report
 
 

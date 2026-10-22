@@ -179,8 +179,8 @@ def make_tools(shipment_id: str) -> dict[str, Callable[..., dict]]:
         rules do not cover (theft, loss or damage of the goods, an accident, no
         way to estimate delivery), start the message with "JUDGMENT:" and say
         why. Then do NOT email the customer: put the email you would have sent
-        (subject and body) in email_draft so the human decides. Otherwise leave
-        email_draft empty.
+        in email_draft, as "Subject: <subject>", a blank line, then the body,
+        so the human decides. Otherwise leave email_draft empty.
         """
         return deliver_alert(shipment_id, message, email_draft)
 
