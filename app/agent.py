@@ -20,13 +20,13 @@ from app.tools import (
     ACTION_LOG,
     HUMAN_NOTIFICATIONS,
     SENT_EMAILS,
-    TOOLS,
-    get_shipment,
-    log_action,
-    notify_human,
+    deliver_alert,
+    is_judgment,
+    lookup_shipment,
+    make_tools,
+    record_action,
     record_guardrail,
     reset_outbox,
-    send_customer_email,
 )
 
 # Normal case needs ~5 rounds. The limit protects against a confused model
@@ -37,9 +37,8 @@ SYSTEM_PROMPT = """You are a customer service agent for a mid-sized logistics op
 You handle shipment events using ONLY the tools you have.
 
 How to work:
-1. ALWAYS start by calling get_shipment with the shipment_id you receive.
-   Use that shipment_id EXACTLY as received in every tool call: never
-   modify, reformat or "correct" it.
+1. ALWAYS start by calling get_shipment. Your tools already work on the
+   shipment of this event: you never pass a shipment_id.
 2. Decide what to do with the business rules below and act with the tools.
 3. Record EVERY action you take with log_action (one call per action).
 4. When you are done, reply with a one-line summary and call no more tools.
@@ -53,16 +52,37 @@ Business rules:
    EVEN WHEN you also escalate: apologise, explain the reason, and state the
    delay (delay_hours) and the original expected_date. Professional tone, in
    the customer's language ("es" = Spanish, "en" = English).
-   The ONLY exception: the customer has no contact_email or does not exist.
-   Then do NOT email; only escalate.
+   The reason: delay_reason is an INTERNAL note for our staff. Never copy it.
+   Tell the customer the cause in general, customer-friendly words (e.g. "a
+   vehicle breakdown", "congestion at the port"), written in the customer's
+   language, with NO internal details: no police reports, no people's names,
+   no names of our warehouses or distribution centres, no internal processes.
+   New delivery date: if new_eta has a date, give it as the new estimated
+   delivery date. If new_eta is empty, say you will let them know the new
+   date as soon as you have it. Never invent or estimate a date yourself.
+   The ONLY exceptions, where you do NOT send the email:
+   - the data is missing or inconsistent (no contact_email, customer not
+     found, new_eta that is not a valid YYYY-MM-DD date): only escalate.
+   - you escalate by judgment (rule 6): do NOT send it; pass the email you
+     would have sent as email_draft in notify_human.
 4. ALSO escalate with notify_human if ANY of these is true:
    - delay_hours > 24
    - customer priority is "alta"
-   - data is missing or inconsistent (no contact_email, customer not found...)
-   The escalation message must include the shipment_id, the customer name and
-   exactly which rule applies with its value (e.g. "delay_hours 30 > 24").
+   - data is missing or inconsistent (no contact_email, customer not found,
+     new_eta that is not a valid YYYY-MM-DD date...)
+   The escalation message must include the customer name and exactly which
+   rule applies with its value (e.g. "delay_hours 30 > 24").
 5. Never invent data (new dates, compensations, discounts) that is not in the
    tool results.
+6. Judgment. These rules can't foresee everything. If delay_reason describes
+   something serious for the customer (theft, loss or damage of the goods, an
+   accident, no way to estimate the delivery), ALSO escalate with
+   notify_human, even if no rule in 4 applies (and also if one does).
+   Start the message with "JUDGMENT:" and explain why in one or two sentences
+   (mention any rule from 4 that also applies). Do NOT send the email: pass
+   it as email_draft ("Subject: ..." line, blank line, body; same style
+   rules) so a human reviews it first. Ordinary causes (breakdown, traffic, weather, congestion) are NOT
+   judgment cases: follow rules 3 and 4.
 
 Email style:
 - Greet the customer by their company name (never "Dear customer").
@@ -70,9 +90,13 @@ Email style:
 - Never mention internal processes (such as escalation) and never promise
   actions that are not in the data.
 
-Example: delay 30 h, normal customer, has contact_email ->
-get_shipment -> send_customer_email -> log_action(email_sent)
--> notify_human -> log_action(escalated) -> one-line summary.
+Examples:
+- delay 30 h, normal customer, has contact_email ->
+  get_shipment -> send_customer_email -> log_action(email_sent)
+  -> notify_human -> log_action(escalated) -> one-line summary.
+- delay 6 h, delay_reason says the goods were lost ->
+  get_shipment -> notify_human("JUDGMENT: ...", email_draft="Subject: ...")
+  -> log_action(escalated) -> one-line summary.
 """
 
 
@@ -97,15 +121,22 @@ class AgentRun:
     model_used: str = ""
 
 
-def execute_tool(name: str, args: dict) -> dict:
+def execute_tool(tools: dict, name: str, args: dict) -> dict:
     """Run the tool the model asked for. Never let an exception stop the loop."""
-    tool = TOOLS.get(name)
+    tool = tools.get(name)
     if tool is None:
         return {"ok": False, "error": f"unknown tool {name!r}"}
     try:
         return tool(**args)
     except Exception as error:  # returned to the model as data, like any error
-        return {"ok": False, "error": f"tool {name} failed: {type(error).__name__}: {error}"}
+        # "technical": the tool crashed (e.g. provider down). Not the same as a
+        # validation error (bad input from the model): the guardrail treats it
+        # as a legitimate reason to escalate, not as an agent mistake.
+        return {
+            "ok": False,
+            "error": f"tool {name} failed: {type(error).__name__}: {error}",
+            "technical": True,
+        }
 
 
 def _should_switch_model(error: errors.APIError) -> bool:
@@ -133,22 +164,6 @@ def _generate(client, run: AgentRun, models: list[str], contents, config):
             run.model_used = models[0]
 
 
-def check_shipment_id(args: dict, expected: str) -> dict | None:
-    """Block a tool call whose shipment_id differs from the event's one.
-
-    The prompt asks the model not to change it; this makes sure in code.
-    Returns an error for the model, or None if the call can run.
-    """
-    given = args.get("shipment_id")
-    if given is not None and given != expected:
-        return {
-            "ok": False,
-            "error": f"shipment_id must be exactly {expected!r}, got {given!r}. "
-            "Use it unchanged.",
-        }
-    return None
-
-
 def run_agent(
     shipment_id: str,
     client: genai.Client | None = None,
@@ -164,11 +179,15 @@ def run_agent(
     # Main model first, then the backups (without repeating the main one).
     models = [model] + [name for name in fallback_models if name != model]
 
+    # Tools for THIS shipment only: the id travels inside them, the model never
+    # writes it (so it cannot change it).
+    tools = make_tools(shipment_id)
+
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         # The SDK turns each function (name, typed params, docstring) into the
         # tool description the model reads.
-        tools=[get_shipment, send_customer_email, notify_human, log_action],
+        tools=list(tools.values()),
         # We run the loop ourselves: visible steps, our own limit, guardrail later.
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
@@ -197,8 +216,7 @@ def run_agent(
         result_parts = []
         for call in calls:
             args = dict(call.args or {})
-            # Wrong shipment_id -> the tool is NOT run, the model gets an error.
-            result = check_shipment_id(args, shipment_id) or execute_tool(call.name, args)
+            result = execute_tool(tools, call.name, args)
             run.tool_calls.append(ToolCall(name=call.name, args=args, result=result))
             result_parts.append(types.Part.from_function_response(name=call.name, response=result))
         # Send the results back so the model can decide the next step.
@@ -223,10 +241,14 @@ class GuardrailReport:
         return bool(self.corrections or self.discrepancies)
 
 
-def apply_guardrail(shipment_id: str) -> GuardrailReport:
-    """Compare what the agent DID (the outbox) with what rules.py says SHOULD happen."""
+def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailReport:
+    """Compare what the agent DID (the outbox) with what rules.py says SHOULD happen.
+
+    `run` lets us see what the agent TRIED (tool_calls), not only what worked:
+    "didn't try" and "tried but the tool failed" are different things.
+    """
     # 1. What should happen: same facts the agent saw, judged by code (no LLM).
-    facts = get_shipment(shipment_id)
+    facts = lookup_shipment(shipment_id)
     expected = evaluate(facts.get("shipment"), facts.get("customer"))
     report = GuardrailReport(expected=expected)
 
@@ -234,16 +256,43 @@ def apply_guardrail(shipment_id: str) -> GuardrailReport:
     did_email = bool(SENT_EMAILS)
     did_escalate = bool(HUMAN_NOTIFICATIONS)
     did_log = bool(ACTION_LOG)
+    # Escalations by judgment (rule 6): the agent saw something serious the
+    # rules don't cover. rules.py can't predict them, so they are accepted.
+    judgment_alerts = [n for n in HUMAN_NOTIFICATIONS if is_judgment(n["message"])]
+    judgment = bool(judgment_alerts)
+    # Technical failures: a tool crashed (e.g. email provider down). Not the
+    # agent's fault, and a legitimate reason for the agent to escalate.
+    calls = run.tool_calls if run else []
+    failed_tools = sorted({call.name for call in calls if call.result.get("technical")})
+    technical_failure = bool(failed_tools)
+    for name in failed_tools:  # informative, to measure how often providers fail
+        record_guardrail(shipment_id, f"technical failure in {name} (not an agent error)")
 
     # 3. Compare. Under-escalating is costly -> fix it. Over-escalating is cheap -> record it.
     must_escalate: list[str] = []
     if expected.escalate and not did_escalate:
         must_escalate.append("; ".join(expected.reasons))
-    if did_escalate and not expected.escalate:
+    if did_escalate and not expected.escalate and not judgment and not technical_failure:
         report.discrepancies.append("agent escalated but no rule requires it")
-    if expected.send_email and not did_email:
-        report.discrepancies.append("agent did not email the customer")
-        must_escalate.append("customer was not emailed, a human must contact them")
+    if judgment:
+        # Always recorded (not an error): lets us measure how often the agent
+        # uses judgment; repeated situations should become rules in rules.py.
+        record_guardrail(shipment_id, "judgment escalation (accepted)",
+                         judgment_alerts[0]["message"][:300])
+        has_draft = any(n["email_draft"].strip() for n in judgment_alerts)
+        if expected.send_email and not has_draft:
+            report.discrepancies.append("judgment escalation without an email draft")
+        if did_email:
+            report.discrepancies.append("agent emailed the customer despite escalating by judgment")
+    # Escalating by judgment replaces the email (the draft goes to the human).
+    if expected.send_email and not did_email and not judgment:
+        if "send_customer_email" in failed_tools:
+            # It tried and the provider failed: not a discrepancy, but the
+            # customer still has no notice, so a human must know.
+            must_escalate.append("customer could not be emailed (technical failure)")
+        else:
+            report.discrepancies.append("agent did not email the customer")
+            must_escalate.append("customer was not emailed, a human must contact them")
     if did_email and not expected.send_email:
         report.discrepancies.append("agent emailed the customer but the rules say it should not")
         must_escalate.append("customer was emailed against the rules")
@@ -251,11 +300,14 @@ def apply_guardrail(shipment_id: str) -> GuardrailReport:
     for discrepancy in report.discrepancies:
         record_guardrail(shipment_id, f"guardrail: {discrepancy}")
 
-    if must_escalate:
+    # Only alert if the human doesn't have the case yet: never two alerts for
+    # one shipment. If the agent already escalated, the discrepancies above
+    # are recorded and that's all.
+    if must_escalate and not did_escalate:
         reason = " | ".join(must_escalate)
-        notify_human(f"[GUARDRAIL] {shipment_id}: {reason}")
-        log_action(shipment_id, "escalated", f"guardrail correction: {reason}",
-                   "escalated by code, the agent did not do it")
+        deliver_alert(shipment_id, f"[GUARDRAIL] {reason}")
+        record_action(shipment_id, "escalated", f"guardrail correction: {reason}",
+                      "escalated by code, the agent did not do it")
         report.corrections.append(f"escalated by code: {reason}")
 
     # Rule 4: every case leaves a trace. If the agent logged nothing, code does.
@@ -270,8 +322,8 @@ def apply_guardrail(shipment_id: str) -> GuardrailReport:
             action = "escalated"
         else:
             action = "error"
-        log_action(shipment_id, action, "guardrail correction: agent did not log its action",
-                   "row written by code")
+        record_action(shipment_id, action, "guardrail correction: agent did not log its action",
+                      "row written by code")
         report.corrections.append(f"missing log written by code ({action})")
 
     return report
@@ -288,7 +340,7 @@ def handle_shipment(
     shipment_id = shipment_id.strip().upper()
     reset_outbox()
     run = run_agent(shipment_id, client=client, model=model)
-    report = apply_guardrail(shipment_id)
+    report = apply_guardrail(shipment_id, run)
     return run, report
 
 

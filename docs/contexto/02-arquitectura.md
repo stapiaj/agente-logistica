@@ -72,7 +72,9 @@ Agente-logistica/
 
 - **Google Sheets como "sistema del cliente":** gratis, visible y editable a mano para la demo; además obliga a hacer una integración real con API y autenticación.
 - **Reglas de negocio en el prompt + herramientas pequeñas:** el LLM decide, pero cada acción pasa por una función controlada. Es el patrón habitual en agentes empresariales.
-- **El LLM decide, el código verifica (guardarraíl):** al terminar el agente, `rules.py` dice qué debía pasar y se compara con lo que hizo. Si faltó un escalado, lo hace el código; si escaló de más, solo se registra (acción `guardrail` en el log).
+- **El LLM decide, el código verifica (guardarraíl):** al terminar el agente, `rules.py` dice qué debía pasar y se compara con lo que hizo y con lo que intentó. Si faltó un escalado, lo hace el código; si escaló de más, solo se registra (acción `guardrail` en el log). Nunca avisa dos veces al humano, y un fallo técnico de una herramienta es motivo legítimo de escalado, no un error del agente (sin falsos positivos que hagan ignorar el guardarraíl).
+- **El modelo no escribe los identificadores:** el `shipment_id` lo inyecta el código en las herramientas (`make_tools`), por ejecución. Lo que el modelo no escribe no lo puede cambiar; y crear las herramientas por ejecución (no con una variable global) evita mezclar ids cuando la API atienda varias peticiones a la vez.
+- **Criterio con red (regla 6):** ante algo grave que las reglas no prevén, el agente escala por criterio (`JUDGMENT:`) y no envía el email: el humano recibe un borrador y decide. Se registra para medirlo y lo que se repita pasa a `rules.py`.
 - **Escalado a humano (human-in-the-loop):** en procesos reales el agente no lo resuelve todo; saber cuándo escalar es parte del diseño.
 - **Token secreto en el webhook:** la API es pública; sin él cualquiera podría disparar el agente.
 - **Registro de cada acción:** trazabilidad y auditoría, imprescindibles para que un cliente confíe en el agente.

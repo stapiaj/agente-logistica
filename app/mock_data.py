@@ -22,6 +22,7 @@ SHIPMENTS: dict[str, dict] = {
         "status": "retrasado",
         "delay_hours": 6,
         "delay_reason": "Avería del camión",
+        "new_eta": "2026-10-23",
     },
     # Case 2: delay > 24 h, normal customer -> email + escalation + log
     "ENV-1002": {
@@ -34,6 +35,7 @@ SHIPMENTS: dict[str, dict] = {
         "status": "retrasado",
         "delay_hours": 30,
         "delay_reason": "Retención en el centro de distribución de Zaragoza",
+        "new_eta": "",  # unknown -> email says we will inform as soon as we know
     },
     # Case 3: short delay, HIGH priority customer (English) -> email + escalation + log
     "ENV-1003": {
@@ -46,6 +48,7 @@ SHIPMENTS: dict[str, dict] = {
         "status": "retrasado",
         "delay_hours": 4,
         "delay_reason": "Congestión en el puerto de Barcelona",
+        "new_eta": "2026-10-22",
     },
     # Case 4: customer WITHOUT email -> no email, escalation + log (incomplete data)
     "ENV-1004": {
@@ -58,6 +61,7 @@ SHIPMENTS: dict[str, dict] = {
         "status": "retrasado",
         "delay_hours": 10,
         "delay_reason": "Cierre temporal de la autovía A-6 por nieve",
+        "new_eta": "",
     },
     # Case 5: ENV-9999 is intentionally NOT here -> "not found" error
     # Case 6: in transit, not delayed -> log no_action
@@ -71,6 +75,25 @@ SHIPMENTS: dict[str, dict] = {
         "status": "en_transito",
         "delay_hours": 0,
         "delay_reason": "",
+        "new_eta": "",
+    },
+    # Case 7 (phase 2b): short delay, normal customer, but the goods were STOLEN.
+    # No rule in rules.py covers it -> escalation by judgment (rule 6), no email,
+    # draft for the human. The reason carries internal details on purpose.
+    "ENV-1006": {
+        "shipment_id": "ENV-1006",
+        "customer_id": "CLI-01",
+        "origin": "Madrid",
+        "destination": "Toledo",
+        "carrier": "TransIberia",
+        "expected_date": "2026-10-23",
+        "status": "retrasado",
+        "delay_hours": 6,
+        "delay_reason": (
+            "Camión robado con la mercancía; denuncia presentada en la Guardia Civil "
+            "de Alcalá de Henares. Se desconoce si se recuperará la carga."
+        ),
+        "new_eta": "",
     },
 }
 

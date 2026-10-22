@@ -14,7 +14,8 @@
 | expected_date | fecha (AAAA-MM-DD) | 2026-10-20 |
 | status | `en_transito` / `retrasado` / `entregado` | retrasado |
 | delay_hours | número | 30 |
-| delay_reason | texto | Avería del camión |
+| delay_reason | texto **interno** (no se copia al cliente) | Avería del camión |
+| new_eta | fecha (AAAA-MM-DD) o vacía si aún no se sabe | 2026-10-23 |
 
 ### `clientes`
 
@@ -32,7 +33,7 @@
 |---|---|
 | timestamp | fecha y hora ISO |
 | shipment_id | texto |
-| action | `email_sent` / `escalated` / `no_action` / `error` / `guardrail` (solo lo escribe el guardarraíl: discrepancia entre lo que hizo el agente y las reglas) |
+| action | `email_sent` / `escalated` / `no_action` / `error` / `guardrail` (solo lo escribe el guardarraíl: discrepancia entre lo que hizo el agente y las reglas, escalado por criterio aceptado o fallo técnico de una herramienta) |
 | reason | texto (por qué el agente decidió eso) |
 | details | texto |
 
@@ -40,21 +41,39 @@
 
 1. Solo actúa sobre envíos con `status = retrasado`. Si no, registra `no_action`.
 2. **Siempre** informa al cliente por email: disculpa, motivo, nuevo plazo estimado y tono profesional en el idioma del cliente.
+   - **Motivo:** `delay_reason` es una nota interna. El email explica la causa con palabras generales para el cliente, traducida a su idioma y sin detalles internos (denuncias, nombres de personas, centros o almacenes, procesos).
+   - **Nuevo plazo:** si `new_eta` tiene fecha, el email la da; si está vacía, dice que se le informará en cuanto se sepa, sin inventar una fecha.
 3. **Escala a un humano** (Telegram) si se cumple cualquiera de estas condiciones:
    - `delay_hours > 24`
    - `priority = alta`
-   - Faltan datos o son incoherentes (no hay email, no existe el cliente…). En ese caso **no** envía email al cliente; solo escala.
+   - Faltan datos o son incoherentes (no hay email, no existe el cliente, `new_eta` con formato inválido…). En ese caso **no** envía email al cliente; solo escala.
 4. **Siempre** registra cada acción en `log_acciones` con el motivo.
 5. Nunca inventa datos (plazos, compensaciones, etc.) que no estén en la hoja.
+6. **Escalado por criterio.** Si `delay_reason` describe algo grave que las reglas no cubren (robo, pérdida o daño de la mercancía, accidente, imposibilidad de estimar la entrega), escala igualmente, aunque también aplique otra regla. El aviso empieza por `JUDGMENT:` y explica por qué. **No** envía el email: lo incluye como borrador (`email_draft`, empezando por `Subject:`) en el aviso, y el humano decide. El guardarraíl lo acepta como escalado legítimo y lo registra (`guardrail`) para poder medirlo; las situaciones que se repitan pasarán a `rules.py`.
+
+### Guardarraíl (en código, tras cada ejecución)
+
+Compara lo que hizo el agente (y lo que intentó) con lo que dice `rules.py`:
+
+- **Faltó un escalado:** escala el código (corrección, `escalated` con motivo `guardrail correction: …`).
+- **Escaló sin regla, no envió email debiendo, o lo envió sin deber:** registra la discrepancia (`guardrail`).
+- **Nunca dos avisos:** si el agente ya escaló, el guardarraíl solo registra.
+- **Fallo técnico de una herramienta** (p. ej. el proveedor de email caído): es motivo legítimo de escalado, no cuenta como discrepancia; se registra como informativo. Si el agente no escaló, escala el código.
+- **Escalado por criterio (`JUDGMENT:`):** aceptado y registrado siempre; discrepancia si falta el borrador o si además envió el email.
+- **Sin log:** lo escribe el código.
 
 ## Herramientas del agente
 
+Cada ejecución trata **un solo envío**. El código crea las herramientas con el `shipment_id` ya dentro (`make_tools(shipment_id)` en `app/tools.py`): **el modelo nunca escribe el id**, así que no puede cambiarlo. La entrada se normaliza antes (`strip().upper()`).
+
 | Herramienta | Entrada | Salida | Efecto |
 |---|---|---|---|
-| `get_shipment(shipment_id)` | id del envío | datos del envío + datos del cliente, o error si no existe | Solo lectura |
+| `get_shipment()` | ninguna (el id lo pone el código) | datos del envío + datos del cliente, o error si no existe | Solo lectura |
 | `send_customer_email(to, subject, body)` | destinatario, asunto, cuerpo | ok / error | Envía un email (Resend) |
-| `notify_human(message)` | texto del aviso | ok / error | Mensaje al responsable (Telegram) |
-| `log_action(shipment_id, action, reason, details)` | campos del log | ok / error | Añade una fila a `log_acciones` |
+| `notify_human(message, email_draft="")` | texto del aviso; borrador opcional del email no enviado (regla 6) | ok / error | Mensaje al responsable (Telegram); el código añade el `shipment_id` |
+| `log_action(action, reason, details)` | campos del log (el id lo pone el código) | ok / error | Añade una fila a `log_acciones` |
+
+Si una herramienta lanza una excepción, el error vuelve al modelo marcado como `technical` (fallo del sistema, no del agente).
 
 ## Casos de prueba
 
@@ -66,3 +85,4 @@
 | ENV-1004 | Cliente sin email | Sin email; escalado + log de datos incompletos |
 | ENV-9999 | No existe | Log de error, sin acciones externas |
 | ENV-1005 | Estado `en_transito` | Log `no_action` |
+| ENV-1006 | Retraso 6 h, cliente normal, camión robado (motivo con detalles internos) | Escalado por criterio (`JUDGMENT:`), **sin email**, borrador en el aviso sin detalles internos; log `escalated` + `guardrail` (criterio aceptado) |
