@@ -130,9 +130,11 @@ def make_tools(shipment_id: str) -> dict[str, Callable[..., dict]]:
 
         Always call this FIRST, before any other tool, to get the facts.
         Returns the shipment (status, delay_hours, delay_reason, expected_date,
-        route, carrier) and its customer (name, contact_email, priority, language).
+        new_eta, route, carrier) and its customer (name, contact_email, priority, language).
         If the shipment does not exist it returns ok=false with an error.
         If the customer does not exist, customer is null.
+        new_eta is the new estimated delivery date (YYYY-MM-DD) or "" if unknown.
+        delay_reason is an internal note for staff: never copy it to the customer.
         """
         return lookup_shipment(shipment_id)
 
@@ -143,7 +145,8 @@ def make_tools(shipment_id: str) -> dict[str, Callable[..., dict]]:
         contact_email. Do NOT use it if the email is missing or the customer does
         not exist: escalate instead. `to` must be the customer's contact_email.
         Write subject and body in the customer's language, greeting the customer
-        by name, with line breaks between paragraphs.
+        by name, with line breaks between paragraphs. Explain the delay cause in
+        general words, never the internal delay_reason text.
         """
         return deliver_email(to, subject, body)
 
