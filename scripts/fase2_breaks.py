@@ -4,6 +4,8 @@ Run from the project root:
     python -m scripts.fase2_breaks bad-id        # malformed shipment_id
     python -m scripts.fase2_breaks tool-crash    # email tool raises an exception
     python -m scripts.fase2_breaks vague-tool    # ambiguous notify_human description
+    python -m scripts.fase2_breaks vague-reason  # (2b) ambiguous delay_reason: judgment or not?
+    python -m scripts.fase2_breaks bad-eta       # (2b) new_eta with an invalid format
 
 Every break is done IN MEMORY: no file of the project is changed.
 """
@@ -11,6 +13,7 @@ Every break is done IN MEMORY: no file of the project is changed.
 import sys
 
 from app import agent, tools
+from app.mock_data import SHIPMENTS
 from app.agent import handle_shipment
 
 
@@ -50,10 +53,34 @@ def break_vague_tool() -> str:
     return "ENV-1002"
 
 
+def break_vague_reason() -> str:
+    """(2b) A reason that MIGHT be serious: no right answer is written down.
+
+    We look at HOW it decides: judgment (JUDGMENT: + draft, no email) or a
+    normal delay (email), and whether its explanation makes sense.
+    """
+    SHIPMENTS["ENV-1001"]["delay_reason"] = "Incidencia en ruta"
+    print("ENV-1001 delay_reason (in memory): 'Incidencia en ruta'\n")
+    return "ENV-1001"
+
+
+def break_bad_eta() -> str:
+    """(2b) new_eta not in YYYY-MM-DD: inconsistent data (rule 3c).
+
+    Expected: no email, escalation. If the agent emails anyway or doesn't
+    escalate, the guardrail must catch it (rules.py validates the format).
+    """
+    SHIPMENTS["ENV-1001"]["new_eta"] = "23/10/2026"
+    print("ENV-1001 new_eta (in memory): '23/10/2026'\n")
+    return "ENV-1001"
+
+
 BREAKS = {
     "bad-id": break_bad_id,
     "tool-crash": break_tool_crash,
     "vague-tool": break_vague_tool,
+    "vague-reason": break_vague_reason,
+    "bad-eta": break_bad_eta,
 }
 
 
