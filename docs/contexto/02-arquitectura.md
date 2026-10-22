@@ -50,15 +50,16 @@ Agente-logistica/
 │   ├── agent.py           # Bucle del agente, prompt del sistema y guardarraíl
 │   ├── tools.py           # Definición de las herramientas
 │   ├── rules.py           # Reglas de negocio en código (única fuente de verdad; las usa el guardarraíl)
-│   ├── mock_data.py       # Datos inventados en memoria (fase 2; en fase 3 los sustituye sheets.py)
+│   ├── mock_data.py       # Datos inventados en memoria (fuente "memory": pruebas rápidas sin cuota)
+│   ├── data_source.py     # Elige la fuente de datos según DATA_SOURCE (memory | sheets)
 │   ├── integrations/
-│   │   ├── sheets.py      # Google Sheets
+│   │   ├── sheets.py      # Google Sheets (adaptador: mismas funciones que mock_data)
 │   │   ├── email.py       # Resend
 │   │   └── telegram.py    # Telegram
 │   └── config.py          # Carga de variables de entorno
 ├── apps_script/
 │   └── webhook.gs         # Código del trigger de la Sheet
-├── scripts/               # Pruebas manuales por fase
+├── scripts/               # Herramientas de desarrollo: pruebas manuales por fase y seed_sheet.py (no se ejecutan en producción)
 ├── docs/
 │   ├── contexto/          # Diseño fijo (contexto del proyecto de Claude)
 │   └── estado/            # Estado vivo: progreso.md y bitacora.md
@@ -71,6 +72,9 @@ Agente-logistica/
 ## Decisiones de diseño (y por qué)
 
 - **Google Sheets como "sistema del cliente":** gratis, visible y editable a mano para la demo; además obliga a hacer una integración real con API y autenticación.
+- **Patrón adaptador para los datos del cliente:** `mock_data.py` e `integrations/sheets.py` ofrecen las mismas tres funciones (`find_shipment`, `find_customer`, `append_log`) con la misma forma de datos, y `DATA_SOURCE` en `.env` elige cuál usar sin tocar código. Las herramientas, el agente y `rules.py` no saben de dónde vienen los datos: otro sistema (un ERP, una base de datos) solo necesita su propio adaptador. El adaptador **traduce, no decide**: convierte el texto de la hoja a tipos y, si un valor no se puede convertir, lo pasa tal cual para que `rules.py` lo marque como dato incoherente.
+- **Acceso mínimo a la hoja:** la cuenta de servicio no tiene roles en el proyecto de Google Cloud, solo acceso de editor a esta hoja, y su token solo pide el permiso de hojas de cálculo. La clave JSON nunca va a Git.
+- **Fallos del sistema del cliente sin tumbar el servicio:** si la hoja no responde, el error llega al agente como fallo técnico, el guardarraíl escala desde el código si nadie lo hizo, y una fila de log solo cuenta como guardada si la hoja la aceptó.
 - **Reglas de negocio en el prompt + herramientas pequeñas:** el LLM decide, pero cada acción pasa por una función controlada. Es el patrón habitual en agentes empresariales.
 - **El LLM decide, el código verifica (guardarraíl):** al terminar el agente, `rules.py` dice qué debía pasar y se compara con lo que hizo y con lo que intentó. Si faltó un escalado, lo hace el código; si escaló de más, solo se registra (acción `guardrail` en el log). Nunca avisa dos veces al humano, y un fallo técnico de una herramienta es motivo legítimo de escalado, no un error del agente (sin falsos positivos que hagan ignorar el guardarraíl).
 - **El modelo no escribe los identificadores:** el `shipment_id` lo inyecta el código en las herramientas (`make_tools`), por ejecución. Lo que el modelo no escribe no lo puede cambiar; y crear las herramientas por ejecución (no con una variable global) evita mezclar ids cuando la API atienda varias peticiones a la vez.
