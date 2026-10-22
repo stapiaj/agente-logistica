@@ -248,7 +248,14 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
     "didn't try" and "tried but the tool failed" are different things.
     """
     # 1. What should happen: same facts the agent saw, judged by code (no LLM).
-    facts = lookup_shipment(shipment_id)
+    try:
+        facts = lookup_shipment(shipment_id)
+    except Exception as error:
+        # The data source failed (e.g. the Sheet is not shared). We can't
+        # judge the case, and it's not the agent's fault: a human must know.
+        facts = {"ok": False, "error": f"{type(error).__name__}: {error}", "technical": True}
+        print(f"[GUARDRAIL] could not read the shipment data: {facts['error']}")
+    data_unreadable = bool(facts.get("technical"))
     expected = evaluate(facts.get("shipment"), facts.get("customer"))
     report = GuardrailReport(expected=expected)
 
@@ -270,9 +277,12 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
 
     # 3. Compare. Under-escalating is costly -> fix it. Over-escalating is cheap -> record it.
     must_escalate: list[str] = []
+    if data_unreadable:
+        must_escalate.append("shipment data could not be read (technical failure)")
     if expected.escalate and not did_escalate:
         must_escalate.append("; ".join(expected.reasons))
-    if did_escalate and not expected.escalate and not judgment and not technical_failure:
+    if (did_escalate and not expected.escalate and not judgment
+            and not technical_failure and not data_unreadable):
         report.discrepancies.append("agent escalated but no rule requires it")
     if judgment:
         # Always recorded (not an error): lets us measure how often the agent
@@ -322,9 +332,13 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
             action = "escalated"
         else:
             action = "error"
-        record_action(shipment_id, action, "guardrail correction: agent did not log its action",
-                      "row written by code")
-        report.corrections.append(f"missing log written by code ({action})")
+        result = record_action(shipment_id, action,
+                               "guardrail correction: agent did not log its action",
+                               "row written by code")
+        if result.get("ok"):
+            report.corrections.append(f"missing log written by code ({action})")
+        else:  # the data source is down: say so, never claim it was saved
+            report.corrections.append(f"missing log could NOT be written ({action}): {result['error']}")
 
     return report
 
