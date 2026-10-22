@@ -14,6 +14,8 @@
 - 2026-10-21 · [chats-IA] Probar el bucle y el guardarraíl con un "Gemini falso" con guion antes de gastar llamadas reales → detecta fallos de lógica sin cuota ni 503. Mantenerlo.
 - 2026-10-21 · [aprendizaje] Ante un fallo del agente, cambiar una cosa y repetir el mismo caso con el mismo modelo → el arreglo se mide, no se supone. Mantenerlo.
 - 2026-10-21 · [aprendizaje] Predecir antes de ejecutar cada rotura y comparar después → las sorpresas (el modelo que reescribe el id) enseñan más que los aciertos.
+- 2026-10-22 · [chats-IA] El chat principal entregó el encargo con las decisiones ya tomadas y su porqué → el chat de ejecución no tuvo que reabrir debates y solo preguntó lo que de verdad faltaba (p. ej. formato inválido de `new_eta`). Mantenerlo.
+- 2026-10-22 · [aprendizaje] Guardar una ejecución "antes" del arreglo (aunque fuera por accidente) y repetir la misma después → la mejora se ve en una tabla (2 avisos → 1). Hacerlo a propósito.
 
 ## A mejorar
 
@@ -28,3 +30,5 @@
 - 2026-10-21 · [entorno] Comandos de prueba en una sola línea (`python -c`) y bloques `@'` de PowerShell resultaron difíciles de leer y de pegar → para pruebas de más de 2 líneas, un script en `scripts/` desde el principio.
 - 2026-10-21 · [planificación] La cuota gratuita de Gemini (20 peticiones/día por modelo) se agotó a mitad de fase: un agente gasta una llamada por vuelta → estimar llamadas por caso y configurar modelos de respaldo antes de lanzar baterías de pruebas.
 - 2026-10-21 · [chats-IA] La IA usó `role="tool"` de ejemplos genéricos y la API de Gemini no lo acepta → contrastar el formato de la conversación con la documentación del proveedor concreto.
+- 2026-10-22 · [chats-IA] Sergio lanzó una prueba antes de que el cambio estuviera implementado (el OK y la prueba se cruzaron) → al proponer un cambio, separar claramente "propuesta, espera OK" de "hecho, ahora prueba"; y en la propuesta no dar el comando de prueba.
+- 2026-10-22 · [planificación] La cuota del plan gratuito se agotó en dos modelos a mitad de fase → probar en el chat con el modelo simulado todo lo posible y reservar las llamadas reales para una sola batería y las roturas; planificar baterías en días distintos si hace falta.
