@@ -77,6 +77,24 @@ SHIPMENTS: dict[str, dict] = {
         "delay_reason": "",
         "new_eta": "",
     },
+    # Case 7 (phase 2b): short delay, normal customer, but the goods were STOLEN.
+    # No rule in rules.py covers it -> escalation by judgment (rule 6), no email,
+    # draft for the human. The reason carries internal details on purpose.
+    "ENV-1006": {
+        "shipment_id": "ENV-1006",
+        "customer_id": "CLI-01",
+        "origin": "Madrid",
+        "destination": "Toledo",
+        "carrier": "TransIberia",
+        "expected_date": "2026-10-23",
+        "status": "retrasado",
+        "delay_hours": 6,
+        "delay_reason": (
+            "Camión robado con la mercancía; denuncia presentada en la Guardia Civil "
+            "de Alcalá de Henares. Se desconoce si se recuperará la carga."
+        ),
+        "new_eta": "",
+    },
 }
 
 # Tab `clientes`: key = customer_id

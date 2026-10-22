@@ -21,6 +21,7 @@ from app.tools import (
     HUMAN_NOTIFICATIONS,
     SENT_EMAILS,
     deliver_alert,
+    is_judgment,
     lookup_shipment,
     make_tools,
     record_action,
@@ -59,9 +60,11 @@ Business rules:
    New delivery date: if new_eta has a date, give it as the new estimated
    delivery date. If new_eta is empty, say you will let them know the new
    date as soon as you have it. Never invent or estimate a date yourself.
-   The ONLY exception: the data is missing or inconsistent (no contact_email,
-   customer not found, new_eta that is not a valid YYYY-MM-DD date).
-   Then do NOT email; only escalate.
+   The ONLY exceptions, where you do NOT send the email:
+   - the data is missing or inconsistent (no contact_email, customer not
+     found, new_eta that is not a valid YYYY-MM-DD date): only escalate.
+   - you escalate by judgment (rule 6): do NOT send it; pass the email you
+     would have sent as email_draft in notify_human.
 4. ALSO escalate with notify_human if ANY of these is true:
    - delay_hours > 24
    - customer priority is "alta"
@@ -71,6 +74,15 @@ Business rules:
    rule applies with its value (e.g. "delay_hours 30 > 24").
 5. Never invent data (new dates, compensations, discounts) that is not in the
    tool results.
+6. Judgment. These rules can't foresee everything. If delay_reason describes
+   something serious for the customer (theft, loss or damage of the goods, an
+   accident, no way to estimate the delivery), ALSO escalate with
+   notify_human, even if no rule in 4 applies (and also if one does).
+   Start the message with "JUDGMENT:" and explain why in one or two sentences
+   (mention any rule from 4 that also applies). Do NOT send the email: pass
+   it as email_draft (subject + body, same style rules) so a human reviews it
+   first. Ordinary causes (breakdown, traffic, weather, congestion) are NOT
+   judgment cases: follow rules 3 and 4.
 
 Email style:
 - Greet the customer by their company name (never "Dear customer").
@@ -78,9 +90,13 @@ Email style:
 - Never mention internal processes (such as escalation) and never promise
   actions that are not in the data.
 
-Example: delay 30 h, normal customer, has contact_email ->
-get_shipment -> send_customer_email -> log_action(email_sent)
--> notify_human -> log_action(escalated) -> one-line summary.
+Examples:
+- delay 30 h, normal customer, has contact_email ->
+  get_shipment -> send_customer_email -> log_action(email_sent)
+  -> notify_human -> log_action(escalated) -> one-line summary.
+- delay 6 h, delay_reason says the goods were lost ->
+  get_shipment -> notify_human("JUDGMENT: ...", email_draft="Subject: ...")
+  -> log_action(escalated) -> one-line summary.
 """
 
 
@@ -229,14 +245,29 @@ def apply_guardrail(shipment_id: str) -> GuardrailReport:
     did_email = bool(SENT_EMAILS)
     did_escalate = bool(HUMAN_NOTIFICATIONS)
     did_log = bool(ACTION_LOG)
+    # Escalations by judgment (rule 6): the agent saw something serious the
+    # rules don't cover. rules.py can't predict them, so they are accepted.
+    judgment_alerts = [n for n in HUMAN_NOTIFICATIONS if is_judgment(n["message"])]
+    judgment = bool(judgment_alerts)
 
     # 3. Compare. Under-escalating is costly -> fix it. Over-escalating is cheap -> record it.
     must_escalate: list[str] = []
     if expected.escalate and not did_escalate:
         must_escalate.append("; ".join(expected.reasons))
-    if did_escalate and not expected.escalate:
+    if did_escalate and not expected.escalate and not judgment:
         report.discrepancies.append("agent escalated but no rule requires it")
-    if expected.send_email and not did_email:
+    if judgment:
+        # Always recorded (not an error): lets us measure how often the agent
+        # uses judgment; repeated situations should become rules in rules.py.
+        record_guardrail(shipment_id, "judgment escalation (accepted)",
+                         judgment_alerts[0]["message"][:300])
+        has_draft = any(n["email_draft"].strip() for n in judgment_alerts)
+        if expected.send_email and not has_draft:
+            report.discrepancies.append("judgment escalation without an email draft")
+        if did_email:
+            report.discrepancies.append("agent emailed the customer despite escalating by judgment")
+    # Escalating by judgment replaces the email (the draft goes to the human).
+    if expected.send_email and not did_email and not judgment:
         report.discrepancies.append("agent did not email the customer")
         must_escalate.append("customer was not emailed, a human must contact them")
     if did_email and not expected.send_email:

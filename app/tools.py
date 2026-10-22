@@ -29,6 +29,8 @@ VALID_ACTIONS = {"email_sent", "escalated", "no_action", "error"}
 # Action reserved for the guardrail (an observation about the agent).
 # Not offered to the model: the agent must not be able to flag itself.
 GUARDRAIL_ACTION = "guardrail"
+# A human alert starting with this is an escalation by judgment (rule 6).
+JUDGMENT_PREFIX = "JUDGMENT:"
 
 # Outbox: everything the agent did during one run.
 SENT_EMAILS: list[dict] = []
@@ -74,13 +76,26 @@ def deliver_email(to: str, subject: str, body: str) -> dict:
     return {"ok": True, "status": "sent (simulated)"}
 
 
-def deliver_alert(shipment_id: str, message: str) -> dict:
-    """Alert the human. The shipment_id is attached by code, not by the model."""
+def deliver_alert(shipment_id: str, message: str, email_draft: str = "") -> dict:
+    """Alert the human. The shipment_id is attached by code, not by the model.
+
+    email_draft: an email the agent did NOT send, for the human to review
+    (human-in-the-loop on judgment escalations).
+    """
     if not message or not message.strip():
         return {"ok": False, "error": "message is required"}
-    HUMAN_NOTIFICATIONS.append({"shipment_id": shipment_id, "message": message})
+    HUMAN_NOTIFICATIONS.append(
+        {"shipment_id": shipment_id, "message": message, "email_draft": email_draft or ""}
+    )
     print(f"[HUMAN ALERT] {shipment_id} | {message}")
+    if email_draft:
+        print(f"[DRAFT FOR REVIEW, NOT SENT]\n{email_draft}\n")
     return {"ok": True, "status": "notified (simulated)"}
+
+
+def is_judgment(message: str) -> bool:
+    """True if a human alert is an escalation by judgment (rule 6)."""
+    return message.strip().upper().startswith(JUDGMENT_PREFIX)
 
 
 def record_action(shipment_id: str, action: str, reason: str, details: str) -> dict:
@@ -147,18 +162,27 @@ def make_tools(shipment_id: str) -> dict[str, Callable[..., dict]]:
         Write subject and body in the customer's language, greeting the customer
         by name, with line breaks between paragraphs. Explain the delay cause in
         general words, never the internal delay_reason text.
+        Do NOT use it when you escalate by judgment (rule 6): put the email in
+        notify_human's email_draft instead, so a human reviews it first.
         """
         return deliver_email(to, subject, body)
 
-    def notify_human(message: str) -> dict:
+    def notify_human(message: str, email_draft: str = "") -> dict:
         """Alert the human supervisor so they take over the case.
 
         Use it when ANY escalation rule applies: delay_hours > 24, customer
         priority "alta", or missing/inconsistent data. The message must include
         the customer name and a clear reason for escalating. The shipment_id is
         attached automatically.
+
+        Judgment escalation: if delay_reason describes something serious the
+        rules do not cover (theft, loss or damage of the goods, an accident, no
+        way to estimate delivery), start the message with "JUDGMENT:" and say
+        why. Then do NOT email the customer: put the email you would have sent
+        (subject and body) in email_draft so the human decides. Otherwise leave
+        email_draft empty.
         """
-        return deliver_alert(shipment_id, message)
+        return deliver_alert(shipment_id, message, email_draft)
 
     def log_action(action: str, reason: str, details: str) -> dict:
         """Record an action in the audit log. Call it once per action you take.
