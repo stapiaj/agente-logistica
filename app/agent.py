@@ -20,13 +20,12 @@ from app.tools import (
     ACTION_LOG,
     HUMAN_NOTIFICATIONS,
     SENT_EMAILS,
-    TOOLS,
-    get_shipment,
-    log_action,
-    notify_human,
+    deliver_alert,
+    lookup_shipment,
+    make_tools,
+    record_action,
     record_guardrail,
     reset_outbox,
-    send_customer_email,
 )
 
 # Normal case needs ~5 rounds. The limit protects against a confused model
@@ -37,9 +36,8 @@ SYSTEM_PROMPT = """You are a customer service agent for a mid-sized logistics op
 You handle shipment events using ONLY the tools you have.
 
 How to work:
-1. ALWAYS start by calling get_shipment with the shipment_id you receive.
-   Use that shipment_id EXACTLY as received in every tool call: never
-   modify, reformat or "correct" it.
+1. ALWAYS start by calling get_shipment. Your tools already work on the
+   shipment of this event: you never pass a shipment_id.
 2. Decide what to do with the business rules below and act with the tools.
 3. Record EVERY action you take with log_action (one call per action).
 4. When you are done, reply with a one-line summary and call no more tools.
@@ -59,8 +57,8 @@ Business rules:
    - delay_hours > 24
    - customer priority is "alta"
    - data is missing or inconsistent (no contact_email, customer not found...)
-   The escalation message must include the shipment_id, the customer name and
-   exactly which rule applies with its value (e.g. "delay_hours 30 > 24").
+   The escalation message must include the customer name and exactly which
+   rule applies with its value (e.g. "delay_hours 30 > 24").
 5. Never invent data (new dates, compensations, discounts) that is not in the
    tool results.
 
@@ -97,9 +95,9 @@ class AgentRun:
     model_used: str = ""
 
 
-def execute_tool(name: str, args: dict) -> dict:
+def execute_tool(tools: dict, name: str, args: dict) -> dict:
     """Run the tool the model asked for. Never let an exception stop the loop."""
-    tool = TOOLS.get(name)
+    tool = tools.get(name)
     if tool is None:
         return {"ok": False, "error": f"unknown tool {name!r}"}
     try:
@@ -133,22 +131,6 @@ def _generate(client, run: AgentRun, models: list[str], contents, config):
             run.model_used = models[0]
 
 
-def check_shipment_id(args: dict, expected: str) -> dict | None:
-    """Block a tool call whose shipment_id differs from the event's one.
-
-    The prompt asks the model not to change it; this makes sure in code.
-    Returns an error for the model, or None if the call can run.
-    """
-    given = args.get("shipment_id")
-    if given is not None and given != expected:
-        return {
-            "ok": False,
-            "error": f"shipment_id must be exactly {expected!r}, got {given!r}. "
-            "Use it unchanged.",
-        }
-    return None
-
-
 def run_agent(
     shipment_id: str,
     client: genai.Client | None = None,
@@ -164,11 +146,15 @@ def run_agent(
     # Main model first, then the backups (without repeating the main one).
     models = [model] + [name for name in fallback_models if name != model]
 
+    # Tools for THIS shipment only: the id travels inside them, the model never
+    # writes it (so it cannot change it).
+    tools = make_tools(shipment_id)
+
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         # The SDK turns each function (name, typed params, docstring) into the
         # tool description the model reads.
-        tools=[get_shipment, send_customer_email, notify_human, log_action],
+        tools=list(tools.values()),
         # We run the loop ourselves: visible steps, our own limit, guardrail later.
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
@@ -197,8 +183,7 @@ def run_agent(
         result_parts = []
         for call in calls:
             args = dict(call.args or {})
-            # Wrong shipment_id -> the tool is NOT run, the model gets an error.
-            result = check_shipment_id(args, shipment_id) or execute_tool(call.name, args)
+            result = execute_tool(tools, call.name, args)
             run.tool_calls.append(ToolCall(name=call.name, args=args, result=result))
             result_parts.append(types.Part.from_function_response(name=call.name, response=result))
         # Send the results back so the model can decide the next step.
@@ -226,7 +211,7 @@ class GuardrailReport:
 def apply_guardrail(shipment_id: str) -> GuardrailReport:
     """Compare what the agent DID (the outbox) with what rules.py says SHOULD happen."""
     # 1. What should happen: same facts the agent saw, judged by code (no LLM).
-    facts = get_shipment(shipment_id)
+    facts = lookup_shipment(shipment_id)
     expected = evaluate(facts.get("shipment"), facts.get("customer"))
     report = GuardrailReport(expected=expected)
 
@@ -253,9 +238,9 @@ def apply_guardrail(shipment_id: str) -> GuardrailReport:
 
     if must_escalate:
         reason = " | ".join(must_escalate)
-        notify_human(f"[GUARDRAIL] {shipment_id}: {reason}")
-        log_action(shipment_id, "escalated", f"guardrail correction: {reason}",
-                   "escalated by code, the agent did not do it")
+        deliver_alert(shipment_id, f"[GUARDRAIL] {reason}")
+        record_action(shipment_id, "escalated", f"guardrail correction: {reason}",
+                      "escalated by code, the agent did not do it")
         report.corrections.append(f"escalated by code: {reason}")
 
     # Rule 4: every case leaves a trace. If the agent logged nothing, code does.
@@ -270,8 +255,8 @@ def apply_guardrail(shipment_id: str) -> GuardrailReport:
             action = "escalated"
         else:
             action = "error"
-        log_action(shipment_id, action, "guardrail correction: agent did not log its action",
-                   "row written by code")
+        record_action(shipment_id, action, "guardrail correction: agent did not log its action",
+                      "row written by code")
         report.corrections.append(f"missing log written by code ({action})")
 
     return report

@@ -10,12 +10,16 @@ Every break is done IN MEMORY: no file of the project is changed.
 
 import sys
 
-from app import tools
+from app import agent, tools
 from app.agent import handle_shipment
 
 
 def break_bad_id() -> str:
-    """Malformed id, as it could arrive from a webhook."""
+    """Malformed id, as it could arrive from a webhook.
+
+    Since phase 2b the model never writes the id: handle_shipment normalises
+    it and the tools carry it inside, so the model can't rewrite it.
+    """
     return "env-1001 "
 
 
@@ -25,14 +29,24 @@ def break_tool_crash() -> str:
     def broken_email(to: str, subject: str, body: str) -> dict:
         raise ConnectionError("email provider unreachable")
 
-    tools.TOOLS["send_customer_email"] = broken_email  # the loop looks tools up by name
+    # The model's send_customer_email calls tools.deliver_email by name at run
+    # time, so replacing the implementation breaks the tool.
+    tools.deliver_email = broken_email
     return "ENV-1001"
 
 
 def break_vague_tool() -> str:
     """notify_human gets a vague description (the SDK reads __doc__)."""
-    tools.notify_human.__doc__ = "Sends a message. Use it to notify about the shipment."
-    print(f"Description the model sees for notify_human:\n    {tools.notify_human.__doc__}\n")
+    vague = "Sends a message. Use it to notify about the shipment."
+    original_make_tools = agent.make_tools
+
+    def make_vague_tools(shipment_id: str) -> dict:
+        built = original_make_tools(shipment_id)
+        built["notify_human"].__doc__ = vague
+        return built
+
+    agent.make_tools = make_vague_tools  # run_agent looks it up at run time
+    print(f"Description the model sees for notify_human:\n    {vague}\n")
     return "ENV-1002"
 
 
