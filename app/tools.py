@@ -22,7 +22,7 @@ in the "outbox" lists below and printed. The guardrail reads them afterwards.
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from app.mock_data import CUSTOMERS, SHIPMENTS
+from app.data_source import get_data_source
 
 # Actions the AGENT may log (what happened to the shipment).
 VALID_ACTIONS = {"email_sent", "escalated", "no_action", "error"}
@@ -51,17 +51,20 @@ def reset_outbox() -> None:
 
 
 def lookup_shipment(shipment_id: str) -> dict:
-    """Shipment + customer, or ok=False if the shipment does not exist."""
-    shipment = SHIPMENTS.get(shipment_id)
+    """Shipment + customer, or ok=False if the shipment does not exist.
+
+    Reads from the source chosen in .env (DATA_SOURCE): memory or the Sheet.
+    The adapters already return copies, with the same shape of data.
+    If the source can't be reached (e.g. the Sheet is not shared) this
+    RAISES: inside the agent loop, execute_tool turns it into a "technical"
+    error for the model; the guardrail catches it on its own.
+    """
+    source = get_data_source()
+    shipment = source.find_shipment(shipment_id)
     if shipment is None:
         return {"ok": False, "error": f"shipment {shipment_id} not found"}
-    customer = CUSTOMERS.get(shipment["customer_id"])
-    # Return copies so the model's data can't modify our "database".
-    return {
-        "ok": True,
-        "shipment": dict(shipment),
-        "customer": dict(customer) if customer else None,
-    }
+    customer = source.find_customer(shipment["customer_id"])
+    return {"ok": True, "shipment": shipment, "customer": customer}
 
 
 def deliver_email(to: str, subject: str, body: str) -> dict:
@@ -105,7 +108,9 @@ def record_action(shipment_id: str, action: str, reason: str, details: str) -> d
             "ok": False,
             "error": f"invalid action {action!r}, use one of {sorted(VALID_ACTIONS)}",
         }
-    _append_log(shipment_id, action, reason, details)
+    saved, error = _append_log(shipment_id, action, reason, details)
+    if not saved:  # the source failed (e.g. Sheet unreachable): not the agent's fault
+        return {"ok": False, "error": f"log row not saved: {error}", "technical": True}
     return {"ok": True}
 
 
@@ -114,8 +119,14 @@ def record_guardrail(shipment_id: str, reason: str, details: str = "") -> None:
     _append_log(shipment_id, GUARDRAIL_ACTION, reason, details)
 
 
-def _append_log(shipment_id: str, action: str, reason: str, details: str) -> None:
-    """Write one row to the audit log (shared by the agent and the guardrail)."""
+def _append_log(shipment_id: str, action: str, reason: str, details: str) -> tuple[bool, str]:
+    """Write one row to the audit log (shared by the agent and the guardrail).
+
+    The row is persisted in the data source first (in memory: nothing to do;
+    in Sheets: one row in log_acciones). It only counts as logged (ACTION_LOG)
+    if the source accepted it: a log that says "saved" when it isn't is worse
+    than no log. Never raises: returns (saved, error message).
+    """
     row = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "shipment_id": shipment_id,
@@ -123,8 +134,15 @@ def _append_log(shipment_id: str, action: str, reason: str, details: str) -> Non
         "reason": reason,
         "details": details,
     }
+    try:
+        get_data_source().append_log(row)
+    except Exception as error:
+        message = f"{type(error).__name__}: {error}"
+        print(f"[LOG NOT SAVED] {shipment_id} | {action} | {message}")
+        return False, message
     ACTION_LOG.append(row)
     print(f"[LOG] {shipment_id} | {action} | {reason}")
+    return True, ""
 
 
 # ---------------------------------------------------------------------------

@@ -49,15 +49,32 @@ Cada fase se hace en su propia rama y termina con algo que funciona, una explica
 
 ## Fase 3 · Integraciones reales
 
-**Objetivo:** sustituir los datos falsos por sistemas reales, una integración cada vez.
+**Objetivo:** sustituir los datos falsos por sistemas reales, una integración cada vez. Se divide en **3a** (Google Sheets) y **3b** (Resend + Telegram): cada integración tiene su cuenta, sus credenciales y sus errores; separadas, cada PR es revisable y los fallos se localizan mejor.
 
-1. **Google Sheets** (`integrations/sheets.py`): crear la hoja con las pestañas de `docs/contexto/05-modelo-datos.md`, cuenta de servicio en Google Cloud, compartir la hoja con ella, leer y escribir con `gspread`.
-2. **Resend** (`integrations/email.py`): cuenta gratuita, API key, envío al email de Sergio.
-3. **Telegram** (`integrations/telegram.py`): crear el bot con @BotFather, obtener el `chat_id`, enviar un mensaje con la API HTTP.
+### Fase 3a · Google Sheets como sistema del cliente
 
-**Conceptos:** autenticación (API key frente a cuenta de servicio), permisos, rate limits, qué pasa cuando un sistema externo falla, reintentos.
-**Romper a propósito:** quitar el permiso de la hoja a la cuenta de servicio; un email de destino inválido; un token de Telegram erróneo.
+**Objetivo:** que envíos, clientes y registro de acciones vivan en una hoja de Google real, sin cambiar la lógica del agente.
+
+- Google Cloud: proyecto, Google Sheets API y Google Drive API, cuenta de servicio y su clave JSON (fuera de Git).
+- Crear la hoja con las pestañas de `docs/contexto/05-modelo-datos.md` y compartirla solo con la cuenta de servicio.
+- `scripts/seed_sheet.py`: rellenar la hoja con los mismos casos de `app/mock_data.py` (datos reproducibles).
+- `integrations/sheets.py`: mismas funciones y mismo formato de datos que `mock_data` (patrón adaptador); convierte el texto de la hoja a tipos y un valor no convertible llega como dato incoherente a `rules.py`, sin romper el programa.
+- `DATA_SOURCE=memory|sheets` en `.env` para elegir la fuente sin tocar código.
+
+**Conceptos:** cuenta de servicio frente a API key, permisos y mínimo privilegio, patrón adaptador, tipos de datos al leer de una hoja, límites de uso de la API de Sheets.
+**Romper a propósito:** dejar de compartir la hoja con la cuenta de servicio; un `GOOGLE_SHEET_ID` erróneo; texto en `delay_hours`.
 **Preguntas de repaso:** si el cliente usara un ERP en vez de una hoja, ¿qué cambiaría? ¿Qué preguntarías al equipo de IT del cliente?
+**Hecho cuando:** con `DATA_SOURCE=sheets` el agente lee de la hoja y escribe el log en ella; con `DATA_SOURCE=memory` todo sigue igual.
+
+### Fase 3b · Resend y Telegram
+
+1. **Resend** (`integrations/email.py`): cuenta gratuita, API key, envío al email de Sergio. El destinatario lo inyecta el código (como `shipment_id`); el modelo solo redacta asunto y cuerpo.
+2. **Telegram** (`integrations/telegram.py`): crear el bot con @BotFather, obtener el `chat_id`, enviar un mensaje con la API HTTP.
+3. Formalizar en prompt y documentación el borrador del email en todo escalado sin email (criterio, fallo técnico, datos incoherentes).
+
+**Conceptos:** autenticación por API key y por token, qué pasa cuando un sistema externo falla, reintentos, rate limits.
+**Romper a propósito:** un email de destino inválido; un token de Telegram erróneo.
+**Preguntas de repaso:** ¿qué pasa si el proveedor de email cae a mitad de un caso? ¿Cómo evitas avisar dos veces al humano?
 
 ---
 

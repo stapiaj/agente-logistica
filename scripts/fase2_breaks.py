@@ -10,11 +10,17 @@ Run from the project root:
 Every break is done IN MEMORY: no file of the project is changed.
 """
 
+import os
 import sys
 
-from app import agent, tools
-from app.mock_data import SHIPMENTS
-from app.agent import handle_shipment
+# These breaks modify the IN-MEMORY data (SHIPMENTS), so they always run on
+# the memory source, whatever DATA_SOURCE says in .env. Must be set before
+# importing app (load_dotenv never overrides a variable that already exists).
+os.environ["DATA_SOURCE"] = "memory"
+
+from app import agent, tools  # noqa: E402
+from app.mock_data import SHIPMENTS  # noqa: E402
+from app.agent import handle_shipment  # noqa: E402
 
 
 def break_bad_id() -> str:

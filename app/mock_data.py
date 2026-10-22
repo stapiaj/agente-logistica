@@ -1,4 +1,4 @@
-"""In-memory fake data for phase 2.
+"""In-memory fake data (phase 2), also the "memory" data source (phase 3a).
 
 These two dicts play the role of the `envios` and `clientes` tabs of the
 future Google Sheet. Field names match the Sheet columns exactly
@@ -128,3 +128,25 @@ CUSTOMERS: dict[str, dict] = {
         "language": "es",
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Adapter (phase 3a): the same 3 functions as app/integrations/sheets.py,
+# so the tools can use either source without knowing which one it is.
+# ---------------------------------------------------------------------------
+
+
+def find_shipment(shipment_id: str) -> dict | None:
+    """One shipment as a dict (a copy, so callers can't modify our data)."""
+    shipment = SHIPMENTS.get(shipment_id)
+    return dict(shipment) if shipment else None
+
+
+def find_customer(customer_id: str) -> dict | None:
+    """One customer as a dict (a copy), or None."""
+    customer = CUSTOMERS.get(customer_id)
+    return dict(customer) if customer else None
+
+
+def append_log(row: dict) -> None:
+    """Nothing to persist: in memory, the outbox (tools.ACTION_LOG) is the log."""
