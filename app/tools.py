@@ -15,14 +15,17 @@ Two layers in this file:
   guardrail uses them directly.
 - Tools for the model (make_tools): thin wrappers bound to one shipment.
 
-Nothing is really sent in this phase: emails, alerts and log rows are stored
-in the "outbox" lists below and printed. The guardrail reads them afterwards.
+Emails go out simulated or for real (EMAIL_MODE, phase 3b). Either way,
+what really happened is stored in the "outbox" lists below and printed:
+the guardrail reads them afterwards.
 """
 
 from collections.abc import Callable
 from datetime import datetime, timezone
 
+from app.config import load_email_mode, load_notify_mode
 from app.data_source import get_data_source
+from app.rules import evaluate
 
 # Actions the AGENT may log (what happened to the shipment).
 VALID_ACTIONS = {"email_sent", "escalated", "no_action", "error"}
@@ -68,18 +71,31 @@ def lookup_shipment(shipment_id: str) -> dict:
 
 
 def deliver_email(to: str, subject: str, body: str) -> dict:
-    """Send (simulate) one email. Validates the input, never raises on it."""
+    """Send one email, simulated or real (EMAIL_MODE in .env).
+
+    Bad input -> ok=False (never raises on it). If the real provider fails it
+    RAISES: execute_tool turns that into a "technical" error. The email only
+    goes to SENT_EMAILS once it was really accepted.
+    """
     if not to or "@" not in to:
         return {"ok": False, "error": f"invalid recipient: {to!r}"}
     if not subject or not body:
         return {"ok": False, "error": "subject and body are required"}
-    email = {"to": to, "subject": subject, "body": body}
-    SENT_EMAILS.append(email)
-    print(f"\n[EMAIL -> {to}]\nSubject: {subject}\n{body}\n")
-    return {"ok": True, "status": "sent (simulated)"}
+    if load_email_mode() == "resend":
+        # Imported only when needed: simulated mode works without Resend.
+        from app.integrations import email as email_provider
+
+        message_id = email_provider.send_email(to, subject, body)
+        status = f"sent via Resend (id {message_id})"
+    else:
+        status = "sent (simulated)"
+    SENT_EMAILS.append({"to": to, "subject": subject, "body": body})
+    print(f"\n[EMAIL -> {to}] {status}\nSubject: {subject}\n{body}\n")
+    return {"ok": True, "status": status}
 
 
-def deliver_alert(shipment_id: str, message: str, email_draft: str = "") -> dict:
+def deliver_alert(shipment_id: str, message: str, email_draft: str = "",
+                  author: str = "agent") -> dict:
     """Alert the human. The shipment_id is attached by code, not by the model.
 
     email_draft: an email the agent did NOT send, for the human to review
@@ -87,13 +103,61 @@ def deliver_alert(shipment_id: str, message: str, email_draft: str = "") -> dict
     """
     if not message or not message.strip():
         return {"ok": False, "error": "message is required"}
+    text = format_alert(shipment_id, message, email_draft, rule_lines(shipment_id), author)
+    if load_notify_mode() == "telegram":
+        # Imported only when needed. If Telegram fails this RAISES ->
+        # "technical" in the loop; the guardrail protects its own call.
+        from app.integrations import telegram
+
+        parts = telegram.send_message(text)
+        status = f"sent via Telegram ({parts} message(s))"
+    else:
+        status = "notified (simulated)"
+    # Only counts as delivered once the channel accepted it.
     HUMAN_NOTIFICATIONS.append(
         {"shipment_id": shipment_id, "message": message, "email_draft": email_draft or ""}
     )
-    print(f"[HUMAN ALERT] {shipment_id} | {message}")
-    if email_draft:
-        print(f"[DRAFT FOR REVIEW, NOT SENT]\n{email_draft}\n")
-    return {"ok": True, "status": "notified (simulated)"}
+    print(f"\n[HUMAN ALERT] {status}\n{text}\n")
+    return {"ok": True, "status": status}
+
+
+def rule_lines(shipment_id: str) -> list[str]:
+    """Why the rules escalate this shipment, computed by CODE (rules.py).
+
+    Added to every alert so the human never depends only on the model's
+    explanation (in phase 3a it wrote "delay_hours seis > 24", a misleading
+    reason). Never raises: if the data can't be read, the alert still goes
+    out and says so. An alert is never blocked for lack of decoration.
+    """
+    try:
+        facts = lookup_shipment(shipment_id)
+    except Exception as error:
+        return [f"rules could not be checked: {type(error).__name__}: {error}"]
+    if not facts.get("ok"):
+        return [f"none: {facts.get('error', 'shipment not found')}"]
+    expected = evaluate(facts.get("shipment"), facts.get("customer"))
+    if expected.reasons:
+        return expected.reasons
+    if not expected.action_required:
+        return ["none: the shipment is not delayed"]
+    return ["none: no rule requires escalation (judgment or technical failure, "
+            "see the message)"]
+
+
+def format_alert(shipment_id: str, message: str, email_draft: str = "",
+                 rules: list[str] | None = None, author: str = "agent") -> str:
+    """The text the human reads (plain text: same in Telegram and on screen).
+
+    Separate blocks so the human sees WHO wrote what: facts checked by code,
+    then the message written by the agent (or the guardrail), then the draft.
+    """
+    text = f"[ESCALATION] Shipment {shipment_id}"
+    if rules:
+        text += "\n\nRules (checked by code):\n" + "\n".join(f"- {line}" for line in rules)
+    text += f"\n\nMessage ({author}):\n{message.strip()}"
+    if email_draft and email_draft.strip():
+        text += f"\n\n--- EMAIL DRAFT (NOT SENT) ---\n{email_draft.strip()}"
+    return text
 
 
 def is_judgment(message: str) -> bool:
@@ -171,34 +235,62 @@ def make_tools(shipment_id: str) -> dict[str, Callable[..., dict]]:
         """
         return lookup_shipment(shipment_id)
 
-    def send_customer_email(to: str, subject: str, body: str) -> dict:
+    def send_customer_email(subject: str, body: str) -> dict:
         """Send an email to the customer about their delayed shipment.
 
+        The recipient is the customer's contact_email, added automatically:
+        you only write subject and body.
         Use it only for shipments with status "retrasado" whose customer has a
-        contact_email. Do NOT use it if the email is missing or the customer does
-        not exist: escalate instead. `to` must be the customer's contact_email.
+        contact_email and whose data is consistent. Otherwise it is refused:
+        escalate instead, with the email as notify_human's email_draft.
         Write subject and body in the customer's language, greeting the customer
         by name, with line breaks between paragraphs. Explain the delay cause in
         general words, never the internal delay_reason text.
         Do NOT use it when you escalate by judgment (rule 6): put the email in
         notify_human's email_draft instead, so a human reviews it first.
         """
-        return deliver_email(to, subject, body)
+        # PREVENT instead of detect: a real email can't be undone, so code
+        # checks BEFORE sending (the guardrail afterwards could only report it).
+        # 1. Fresh facts, not what the model remembers. If the source is down
+        #    this raises -> "technical" and nothing is sent (fail closed).
+        facts = lookup_shipment(shipment_id)
+        expected = evaluate(facts.get("shipment"), facts.get("customer"))
+        # 2. The rules say no email -> refuse. It's the agent's mistake.
+        if not expected.send_email:
+            why = "; ".join(expected.reasons) or "shipment not found or not delayed"
+            hint = ("escalate with notify_human and put the email in email_draft"
+                    if expected.escalate else "do not email; just log the action")
+            return {"ok": False, "agent_error": True, "refused_by_rules": True,
+                    "error": f"refused: the rules say this customer must NOT be emailed "
+                             f"({why}). Nothing was sent: {hint}."}
+        # 3. Rule 6: rules.py can't see judgment. If the agent already escalated
+        #    by judgment, the email belongs to the human (email_draft).
+        if any(is_judgment(n["message"]) for n in HUMAN_NOTIFICATIONS
+               if n["shipment_id"] == shipment_id):
+            return {"ok": False, "agent_error": True, "refused_by_rules": True,
+                    "error": "refused: you already escalated by judgment (rule 6). Nothing "
+                             "was sent: the email goes as email_draft for a human to review."}
+        # 4. The recipient comes from the data, never from the model.
+        return deliver_email(facts["customer"]["contact_email"], subject, body)
 
     def notify_human(message: str, email_draft: str = "") -> dict:
         """Alert the human supervisor so they take over the case.
 
         Use it when ANY escalation rule applies: delay_hours > 24, customer
         priority "alta", or missing/inconsistent data. The message must include
-        the customer name and a clear reason for escalating. The shipment_id is
-        attached automatically.
+        the customer name and a clear reason for escalating. The shipment_id
+        and the rules that apply (checked by code) are attached automatically.
 
         Judgment escalation: if delay_reason describes something serious the
         rules do not cover (theft, loss or damage of the goods, an accident, no
         way to estimate delivery), start the message with "JUDGMENT:" and say
-        why. Then do NOT email the customer: put the email you would have sent
-        in email_draft, as "Subject: <subject>", a blank line, then the body,
-        so the human decides. Otherwise leave email_draft empty.
+        why, and do NOT email the customer.
+
+        email_draft: whenever you escalate and the customer was NOT emailed
+        (judgment, missing or inconsistent data, the email failed or was
+        refused), put the email you would have sent here, as
+        "Subject: <subject>", a blank line, then the body, so the human has it
+        ready. Leave it empty only if the customer was already emailed.
         """
         return deliver_alert(shipment_id, message, email_draft)
 

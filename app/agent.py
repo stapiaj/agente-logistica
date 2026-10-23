@@ -8,6 +8,7 @@ Agent loop (manual, so every step is visible):
   4. Stop anyway after MAX_ITERATIONS rounds.
 """
 
+import inspect
 import sys
 from dataclasses import dataclass, field
 
@@ -51,7 +52,8 @@ Business rules:
 3. For delayed shipments ALWAYS email the customer (send_customer_email),
    EVEN WHEN you also escalate: apologise, explain the reason, and state the
    delay (delay_hours) and the original expected_date. Professional tone, in
-   the customer's language ("es" = Spanish, "en" = English).
+   the customer's language ("es" = Spanish, "en" = English). The tool already
+   knows the customer's address: you only write subject and body.
    The reason: delay_reason is an INTERNAL note for our staff. Never copy it.
    Tell the customer the cause in general, customer-friendly words (e.g. "a
    vehicle breakdown", "congestion at the port"), written in the customer's
@@ -63,15 +65,20 @@ Business rules:
    The ONLY exceptions, where you do NOT send the email:
    - the data is missing or inconsistent (no contact_email, customer not
      found, new_eta that is not a valid YYYY-MM-DD date): only escalate.
-   - you escalate by judgment (rule 6): do NOT send it; pass the email you
-     would have sent as email_draft in notify_human.
+   - you escalate by judgment (rule 6).
+   In both cases, and also if send_customer_email fails or is refused, pass
+   the email you would have sent as email_draft in notify_human ("Subject:
+   ..." line, blank line, body; same style rules): the human gets the work
+   half done and may reach the customer another way.
 4. ALSO escalate with notify_human if ANY of these is true:
    - delay_hours > 24
    - customer priority is "alta"
    - data is missing or inconsistent (no contact_email, customer not found,
      new_eta that is not a valid YYYY-MM-DD date...)
    The escalation message must include the customer name and exactly which
-   rule applies with its value (e.g. "delay_hours 30 > 24").
+   rule applies with its value (e.g. "delay_hours 30 > 24"). The code also
+   attaches the rules it checked; never guess a value you did not see.
+   Whenever the customer was NOT emailed, include email_draft (rule 3).
 5. Never invent data (new dates, compensations, discounts) that is not in the
    tool results.
 6. Judgment. These rules can't foresee everything. If delay_reason describes
@@ -94,6 +101,9 @@ Examples:
 - delay 30 h, normal customer, has contact_email ->
   get_shipment -> send_customer_email -> log_action(email_sent)
   -> notify_human -> log_action(escalated) -> one-line summary.
+- customer has no contact_email ->
+  get_shipment -> notify_human("...", email_draft="Subject: ...")
+  -> log_action(escalated) -> one-line summary.
 - delay 6 h, delay_reason says the goods were lost ->
   get_shipment -> notify_human("JUDGMENT: ...", email_draft="Subject: ...")
   -> log_action(escalated) -> one-line summary.
@@ -122,10 +132,28 @@ class AgentRun:
 
 
 def execute_tool(tools: dict, name: str, args: dict) -> dict:
-    """Run the tool the model asked for. Never let an exception stop the loop."""
+    """Run the tool the model asked for. Never let an exception stop the loop.
+
+    Three kinds of failure, told apart on purpose:
+    - unknown tool or arguments that don't match its signature -> the AGENT's
+      mistake ("agent_error"): checked BEFORE calling, so a TypeError raised
+      inside a tool (a real bug or a provider crash) is never blamed on it;
+    - an exception inside the tool -> "technical" (not the agent's fault);
+    - a tool's own validation (e.g. empty subject) -> plain ok=False.
+    """
     tool = tools.get(name)
     if tool is None:
-        return {"ok": False, "error": f"unknown tool {name!r}"}
+        return {"ok": False, "error": f"unknown tool {name!r}, available: {sorted(tools)}",
+                "agent_error": True}
+    signature = inspect.signature(tool)
+    try:
+        signature.bind(**args)  # same check Python does on a call, without calling
+    except TypeError as error:
+        # e.g. the model invents shipment_id or forgets subject. The expected
+        # signature goes back to the model so it can fix the call next round.
+        return {"ok": False,
+                "error": f"invalid arguments for {name}: {error}. Expected: {name}{signature}",
+                "agent_error": True}
     try:
         return tool(**args)
     except Exception as error:  # returned to the model as data, like any error
@@ -274,6 +302,18 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
     technical_failure = bool(failed_tools)
     for name in failed_tools:  # informative, to measure how often providers fail
         record_guardrail(shipment_id, f"technical failure in {name} (not an agent error)")
+    # Agent errors: unknown tool or invalid arguments. Only recorded (the
+    # agent got the error back and could retry): measures how often it fails.
+    invalid_calls = sorted({call.name for call in calls if call.result.get("agent_error")
+                            and not call.result.get("refused_by_rules")})
+    for name in invalid_calls:
+        record_guardrail(shipment_id, f"agent error: invalid call to {name}")
+    # Email refused BEFORE sending (prevent > detect): nothing reached the
+    # customer, but the agent tried. Recorded separately to measure it.
+    refused = [call for call in calls if call.result.get("refused_by_rules")]
+    if refused:
+        record_guardrail(shipment_id, "agent error: tried to email against the rules (refused)",
+                         refused[0].result["error"][:300])
 
     # 3. Compare. Under-escalating is costly -> fix it. Over-escalating is cheap -> record it.
     must_escalate: list[str] = []
@@ -289,9 +329,6 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
         # uses judgment; repeated situations should become rules in rules.py.
         record_guardrail(shipment_id, "judgment escalation (accepted)",
                          judgment_alerts[0]["message"][:300])
-        has_draft = any(n["email_draft"].strip() for n in judgment_alerts)
-        if expected.send_email and not has_draft:
-            report.discrepancies.append("judgment escalation without an email draft")
         if did_email:
             report.discrepancies.append("agent emailed the customer despite escalating by judgment")
     # Escalating by judgment replaces the email (the draft goes to the human).
@@ -303,6 +340,11 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
         else:
             report.discrepancies.append("agent did not email the customer")
             must_escalate.append("customer was not emailed, a human must contact them")
+    # Decision 2: every escalation without an email carries the draft, so the
+    # human gets the work half done. Only recorded: an alert is never blocked.
+    if (did_escalate and not did_email and expected.action_required
+            and not any(n["email_draft"].strip() for n in HUMAN_NOTIFICATIONS)):
+        report.discrepancies.append("escalated without emailing and without an email draft")
     if did_email and not expected.send_email:
         report.discrepancies.append("agent emailed the customer but the rules say it should not")
         must_escalate.append("customer was emailed against the rules")
@@ -313,12 +355,35 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
     # Only alert if the human doesn't have the case yet: never two alerts for
     # one shipment. If the agent already escalated, the discrepancies above
     # are recorded and that's all.
+    # The agent's own alert failed (e.g. Telegram down): its message and its
+    # email draft would be lost, so the guardrail tries once more with them.
+    # A duplicate alert is cheap (unlike a duplicate email to a customer).
+    failed_alert = next((call for call in calls
+                         if call.name == "notify_human" and call.result.get("technical")), None)
+    if failed_alert and not did_escalate:
+        must_escalate.append("the agent's alert could not be delivered (technical failure)")
+
     if must_escalate and not did_escalate:
         reason = " | ".join(must_escalate)
-        deliver_alert(shipment_id, f"[GUARDRAIL] {reason}")
-        record_action(shipment_id, "escalated", f"guardrail correction: {reason}",
-                      "escalated by code, the agent did not do it")
-        report.corrections.append(f"escalated by code: {reason}")
+        message = f"[GUARDRAIL] {reason}"
+        draft = ""
+        if failed_alert:
+            message += f"\n\nAgent's message: {failed_alert.args.get('message', '')}"
+            draft = failed_alert.args.get("email_draft", "")
+        try:
+            deliver_alert(shipment_id, message, draft, author="guardrail, code")
+        except Exception as error:
+            # The channel to reach the human is the one failing: never crash,
+            # leave it in the log (last resort) and say it loudly.
+            detail = f"{type(error).__name__}: {error}"
+            print(f"\n!!! HUMAN ALERT NOT DELIVERED for {shipment_id}: {detail}\n")
+            record_action(shipment_id, "error", f"human alert could NOT be delivered: {reason}",
+                          detail)
+            report.corrections.append(f"alert by code FAILED ({detail}): {reason}")
+        else:
+            record_action(shipment_id, "escalated", f"guardrail correction: {reason}",
+                          "escalated by code, the agent did not do it")
+            report.corrections.append(f"escalated by code: {reason}")
 
     # Rule 4: every case leaves a trace. If the agent logged nothing, code does.
     if not did_log:
@@ -343,6 +408,25 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
     return report
 
 
+def describe_failed_calls(run: AgentRun) -> list[str]:
+    """One line per failed tool call: arguments, error and whose fault it is."""
+    lines = []
+    for index, call in enumerate(run.tool_calls, 1):
+        if call.result.get("ok") is not False:
+            continue
+        if call.result.get("technical"):
+            kind = "technical"
+        elif call.result.get("refused_by_rules"):
+            kind = "agent: refused by the rules"
+        elif call.result.get("agent_error"):
+            kind = "agent: invalid call"
+        else:
+            kind = "rejected by the tool"
+        lines.append(f"  FAILED {index}. {call.name}({call.args}) -> "
+                     f"{call.result.get('error')} [{kind}]")
+    return lines
+
+
 def handle_shipment(
     shipment_id: str,
     client: genai.Client | None = None,
@@ -365,6 +449,8 @@ if __name__ == "__main__":
     print(f"\n--- {sid}: {result.iterations} rounds, limit hit: {result.hit_iteration_limit}, model: {result.model_used}")
     for i, c in enumerate(result.tool_calls, 1):
         print(f"{i}. {c.name}({c.args}) -> ok={c.result.get('ok')}")
+    for line in describe_failed_calls(result):
+        print(line)
     print(f"Final: {result.final_text}")
     print(f"Guardrail intervened: {guard.intervened}")
     for item in guard.corrections:

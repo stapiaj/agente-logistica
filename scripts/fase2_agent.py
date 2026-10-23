@@ -15,7 +15,7 @@ import time
 from google import genai
 
 from app import tools
-from app.agent import handle_shipment
+from app.agent import describe_failed_calls, handle_shipment
 from app.tools import is_judgment
 from app.config import load_config
 
@@ -37,6 +37,9 @@ EXPECTED = {
 # "JUDGMENT:" and an email draft). In every other case JUDGMENT must NOT
 # appear: that catches the agent using judgment to skip normal emails.
 JUDGMENT_CASES = {"ENV-1006"}
+
+# Escalated WITHOUT email: the alert must carry the email draft (decision 2, phase 3b).
+DRAFT_CASES = {"ENV-1004", "ENV-1006"}
 
 
 def yes_no(value: bool) -> str:
@@ -72,11 +75,14 @@ def main() -> None:
         logged = {row["action"] for row in tools.ACTION_LOG}
         judged = any(is_judgment(n["message"]) and n["email_draft"].strip()
                      for n in tools.HUMAN_NOTIFICATIONS)
+        drafted = any(n["email_draft"].strip() for n in tools.HUMAN_NOTIFICATIONS)
 
         exp_email, exp_escalate, exp_logs = EXPECTED[shipment_id]
         exp_judged = shipment_id in JUDGMENT_CASES
+        exp_draft = shipment_id in DRAFT_CASES
         matches = (emailed == exp_email and escalated == exp_escalate
-                   and exp_logs <= logged and judged == exp_judged)
+                   and exp_logs <= logged and judged == exp_judged
+                   and (drafted or not exp_draft))
         if not matches:
             verdict = "CHECK"
         elif guard.intervened:
@@ -87,6 +93,8 @@ def main() -> None:
         print(f"\nModel: {run.model_used} | rounds: {run.iterations} "
               f"| limit hit: {run.hit_iteration_limit}")
         print("Tools used: " + " -> ".join(call.name for call in run.tool_calls))
+        for line in describe_failed_calls(run):  # arguments + error of each failure
+            print(line)
         print(f"Guardrail intervened: {guard.intervened}")
         for item in guard.corrections:
             print(f"  correction: {item}")
@@ -95,12 +103,13 @@ def main() -> None:
         print(f"Email: {yes_no(emailed)} (expected {yes_no(exp_email)}) | "
               f"Escalated: {yes_no(escalated)} (expected {yes_no(exp_escalate)}) | "
               f"Log: {sorted(logged)} (must include {sorted(exp_logs)}) | "
-              f"Judgment+draft: {yes_no(judged)} (expected {yes_no(exp_judged)})")
+              f"Judgment+draft: {yes_no(judged)} (expected {yes_no(exp_judged)}) | "
+              f"Draft: {yes_no(drafted)} (required: {yes_no(exp_draft)})")
         print(f"Result: {verdict}")
         summary.append((shipment_id, yes_no(emailed), yes_no(escalated),
                         "yes" if guard.intervened else "no", verdict))
 
-    print(f"\n{'=' * 70}\nSUMMARY\n{'=' * 70}")
+    print(f"\n{'=' * 70}\nSUMMARY (CHECK = differs from a normal run; expected during a break)\n{'=' * 70}")
     print(f"{'Shipment':<10} {'Email':<6} {'Escal.':<7} {'Guardrail':<10} Result")
     for row in summary:
         print(f"{row[0]:<10} {row[1]:<6} {row[2]:<7} {row[3]:<10} {row[4]}")

@@ -19,6 +19,10 @@
 - 2026-10-22 · [planificación] Probar cada integración primero sin LLM (modo `smoke`: leer, escribir y releer) y solo después con el agente → la integración se valida sin gastar cuota y, si algo falla con el agente, ya se sabe que no es la conexión. Mantenerlo en la 3b (Resend, Telegram).
 - 2026-10-22 · [aprendizaje] Comprobar releyendo del sistema real lo que el código dice que ha escrito (el log se relee de la hoja) → se confía en el destino, no en el mensaje de Python. Mantenerlo.
 - 2026-10-22 · [chats-IA] Probar el adaptador y los fallos de la hoja con una hoja simulada antes de que Sergio ejecutara → apareció un mensaje engañoso del guardarraíl ("log escrito" sin estarlo) sin gastar llamadas. Mantenerlo.
+- 2026-10-23 · [seguridad] Probar la red de seguridad con la configuración incompleta (sin `EMAIL_TEST_RECIPIENT`) reveló que fallaba abierta → en lo irreversible, probar a propósito qué pasa si falta la protección y hacer que falle cerrado.
+- 2026-10-23 · [seguridad] Diagnosticar un secreto sin mostrarlo (longitud, partes, caracteres raros) → resolvió el 401 de Telegram sin exponer el token. Mantenerlo.
+- 2026-10-23 · [aprendizaje] Repetir la misma rotura con el modelo mostró dos caminos distintos (se saltó el aviso / avisó y falló) → con LLM, repetir la rotura si el camino importa, y cubrir cada camino con un check determinista sin LLM.
+- 2026-10-23 · [planificación] Un archivo de checks sin LLM que crece tarea a tarea (`fase3b_checks.py`) → cada tarea se valida en segundos y sin cuota antes de gastar llamadas reales. Mantenerlo desde la primera tarea de cada fase.
 
 ## A mejorar
 
@@ -37,3 +41,6 @@
 - 2026-10-22 · [planificación] La cuota del plan gratuito se agotó en dos modelos a mitad de fase → probar en el chat con el modelo simulado todo lo posible y reservar las llamadas reales para una sola batería y las roturas; planificar baterías en días distintos si hace falta.
 - 2026-10-22 · [chats-IA] La IA supuso cómo devuelve una pestaña vacía la librería (`[]`) y era `[[]]`; el seed se paró a la primera → con una librería nueva, comprobar en el chat el comportamiento real en los bordes (vacío, una fila, celdas de menos) antes de que Sergio ejecute.
 - 2026-10-22 · [aprendizaje] El banco de pruebas solo mostraba el nombre de las herramientas: un fallo intermitente de `-lite` (llamada a `send_customer_email` que lanzó una excepción) quedó sin diagnosticar porque no se repitió → en los bancos de prueba, imprimir argumentos y error de cada llamada fallida desde el principio.
+- 2026-10-22 · [git] En la 3a se hizo un commit después de fusionar el PR y se quedó fuera de `main` (hizo falta un segundo PR) → hacer todos los commits, incluidas las notas de cierre, antes de abrir el PR; si algo llega tarde, PR nuevo de la misma rama.
+- 2026-10-23 · [entorno] Variables nuevas de `.env` que faltaron al probar (`EMAIL_TEST_RECIPIENT`, `NOTIFY_MODE`) → al añadir variables, dar el bloque completo para `.env` y, en el mismo paso, el comando que comprueba que están (`Select-String -Pattern '_MODE'`), sin mostrar secretos.
+- 2026-10-23 · [chats-IA] Mensajes escritos por la IA que confundieron: la pista del 401 mencionaba el destinatario y las tablas de "lo esperado" no decían que eran para una ejecución normal → un mensaje de error por causa (no agrupar códigos) y toda tabla de "esperado" dice en qué escenario aplica.
