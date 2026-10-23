@@ -5,11 +5,14 @@ Interactive docs:  http://127.0.0.1:8000/docs
 """
 
 import secrets
+import threading
+import traceback
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.agent import describe_failed_calls, handle_shipment
 from app.config import load_webhook_secret
 
 # Read once at startup. If it is missing, the server refuses to start.
@@ -60,11 +63,52 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/webhook/shipment-delayed", dependencies=[Depends(verify_secret)])
-def shipment_delayed(event: ShipmentDelayedEvent) -> dict:
+# One agent at a time. The agent keeps what it did in shared lists (the
+# "outbox" in app/tools.py) and empties them at the start of each run: two
+# agents at once would mix their outboxes and the guardrail would check the
+# wrong data. Notices still get their 202 at once; only the agents queue up.
+AGENT_LOCK = threading.Lock()
+
+
+def run_agent_job(shipment_id: str, event_id: str) -> None:
+    """Background job: runs AFTER the 202 has been sent.
+
+    Nobody is waiting for this result (it goes to the sheet, email and
+    Telegram), so any failure is caught and printed here: it must never
+    take the server down. SystemExit too: config errors call sys.exit().
+    """
+    with AGENT_LOCK:
+        print(f"[agent] start {shipment_id} (event {event_id})", flush=True)
+        try:
+            run, report = handle_shipment(shipment_id)
+        except (Exception, SystemExit):
+            print(f"[agent] FAILED {shipment_id} (event {event_id}):", flush=True)
+            traceback.print_exc()
+            return
+        tools_used = ", ".join(call.name for call in run.tool_calls) or "none"
+        print(f"[agent] done {shipment_id} (event {event_id}): "
+              f"{run.iterations} rounds, model {run.model_used}, tools: {tools_used}", flush=True)
+        for line in describe_failed_calls(run):
+            print(f"[agent]   {line}", flush=True)
+        if report.intervened:
+            for item in report.corrections:
+                print(f"[agent]   guardrail correction: {item}", flush=True)
+            for item in report.discrepancies:
+                print(f"[agent]   guardrail discrepancy: {item}", flush=True)
+
+
+@app.post(
+    "/webhook/shipment-delayed",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(verify_secret)],
+)
+def shipment_delayed(event: ShipmentDelayedEvent, background_tasks: BackgroundTasks) -> dict:
     """Entry point for 'this shipment is delayed' notices.
 
-    T3: only reached with the right secret and a valid body; echoes it.
-    Background agent + 202 (T4) and idempotency (T5) come next.
+    Only reached with the right secret (401 otherwise) and a valid body
+    (422 otherwise). Answers 202 at once: "received, I'll handle it". The
+    agent takes seconds; the sender must not wait (or retry on a timeout).
+    Idempotency (T5) comes next.
     """
-    return {"received": event.model_dump()}
+    background_tasks.add_task(run_agent_job, event.shipment_id, event.event_id)
+    return {"status": "accepted", "shipment_id": event.shipment_id, "event_id": event.event_id}
