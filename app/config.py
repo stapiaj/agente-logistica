@@ -124,3 +124,22 @@ def load_telegram_config(need_chat_id: bool = True) -> tuple[str, str]:
     if need_chat_id and not chat_id:
         sys.exit("Missing TELEGRAM_CHAT_ID in .env: run python -m app.integrations.telegram --find-chat-id")
     return token, chat_id
+
+
+MIN_WEBHOOK_SECRET_LENGTH = 32
+
+
+def load_webhook_secret() -> str:
+    """Shared secret that every webhook call must send in X-Webhook-Secret.
+
+    FAIL CLOSED: empty or too short -> the server does not start. A webhook
+    without a lock must not exist, not even by accident (whoever can call it
+    can make the agent email customers). Generate one with:
+    python -c "import secrets; print(secrets.token_urlsafe(32))"
+    """
+    load_dotenv()
+    secret = os.getenv("WEBHOOK_SECRET", "").strip()
+    if len(secret) < MIN_WEBHOOK_SECRET_LENGTH:
+        sys.exit(f"Missing or too short WEBHOOK_SECRET in .env (min {MIN_WEBHOOK_SECRET_LENGTH} chars). "
+                 'Generate one: python -c "import secrets; print(secrets.token_urlsafe(32))"')
+    return secret
