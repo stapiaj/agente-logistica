@@ -47,6 +47,24 @@ Cada fase se hace en su propia rama y termina con algo que funciona, una explica
 
 ---
 
+## Fase 2b · Endurecimiento del agente
+
+**Objetivo:** antes de conectar sistemas reales, cerrar los fallos vistos en las pruebas de la fase 2: dar margen de criterio al agente ante lo imprevisto y reforzar en código lo que no debe depender del modelo. Se añadió al plan tras la fase 2 (no estaba en el diseño inicial).
+
+- **a) Escalado por criterio (regla 6):** si `delay_reason` describe algo grave que las reglas no cubren (robo, pérdida, daño, accidente), el agente escala con `JUDGMENT:` y el log lo registra (medible).
+- **b) `delay_reason` es interno:** el email explica el motivo en lenguaje para el cliente, sin detalles internos y en su idioma.
+- **c) Borrador en vez de email** en los escalados por criterio: `notify_human(message, email_draft)`; decide el humano.
+- **d) Columna `new_eta`:** con fecha, el email la da; vacía, no se inventa; con formato inválido, dato incoherente → escalar sin email.
+- **e) Guardarraíl sin avisos duplicados:** si el agente ya escaló, solo registra; un fallo técnico de una herramienta no cuenta como error del agente.
+- **f) `shipment_id` inyectado por el código:** fuera de los parámetros de las herramientas (herramientas creadas por ejecución).
+
+**Conceptos:** workflow frente a agente (el criterio ante lo imprevisto), prevenir frente a detectar, fallar de forma segura frente a degradar con elegancia, falsos positivos y fatiga de alertas, contratos de datos (qué campos ve el cliente).
+**Romper a propósito:** un motivo vago ("Incidencia en ruta"); un `new_eta` con formato inválido.
+**Preguntas de repaso:** ¿cómo das margen de criterio al agente sin sorpresas? ¿Qué haces si el guardarraíl genera demasiadas alertas? ¿Qué escribe el modelo y qué el código?
+**Hecho cuando:** los 7 casos de prueba pasan con el modelo real (incluido ENV-1006, robo: aviso con borrador y sin email) y Sergio explica los cambios a–f.
+
+---
+
 ## Fase 3 · Integraciones reales
 
 **Objetivo:** sustituir los datos falsos por sistemas reales, una integración cada vez. Se divide en **3a** (Google Sheets) y **3b** (Resend + Telegram): cada integración tiene su cuenta, sus credenciales y sus errores; separadas, cada PR es revisable y los fallos se localizan mejor.
@@ -68,13 +86,19 @@ Cada fase se hace en su propia rama y termina con algo que funciona, una explica
 
 ### Fase 3b · Resend y Telegram
 
-1. **Resend** (`integrations/email.py`): cuenta gratuita, API key, envío al email de Sergio. El destinatario lo inyecta el código (como `shipment_id`); el modelo solo redacta asunto y cuerpo.
-2. **Telegram** (`integrations/telegram.py`): crear el bot con @BotFather, obtener el `chat_id`, enviar un mensaje con la API HTTP.
-3. Formalizar en prompt y documentación el borrador del email en todo escalado sin email (criterio, fallo técnico, datos incoherentes).
+**Objetivo:** que el email al cliente y el aviso al responsable salgan de verdad, con las protecciones necesarias ahora que una acción ya no se puede deshacer.
 
-**Conceptos:** autenticación por API key y por token, qué pasa cuando un sistema externo falla, reintentos, rate limits.
-**Romper a propósito:** un email de destino inválido; un token de Telegram erróneo.
-**Preguntas de repaso:** ¿qué pasa si el proveedor de email cae a mitad de un caso? ¿Cómo evitas avisar dos veces al humano?
+1. **Validación de argumentos** antes de ejecutar cada herramienta (`inspect.signature(tool).bind(**args)`): si no encajan, es error del agente, no fallo técnico. El banco de pruebas muestra argumentos y error de cada llamada fallida.
+2. **Resend** (`integrations/email.py`): cuenta gratuita y API key. Sin dominio propio solo se puede enviar al email de la cuenta → `EMAIL_TEST_RECIPIENT` (modo pruebas: todo va ahí y el cuerpo indica a quién iba dirigido). `EMAIL_MODE=simulated|resend`.
+3. **`send_customer_email` endurecida:** el destinatario lo inyecta el código (como `shipment_id`; el modelo solo redacta asunto y cuerpo) y, antes de enviar, consulta `rules.py`: si las reglas dicen "sin email", se niega (error del agente). Prevenir en vez de detectar, porque el email no se deshace.
+4. **Telegram** (`integrations/telegram.py`): bot con @BotFather, `chat_id`, API HTTP, límite de longitud de los mensajes. `NOTIFY_MODE=simulated|telegram`.
+5. **`notify_human` endurecida:** borrador del email en todo escalado sin email (criterio, fallo técnico, datos incoherentes) y motivos según `rules.py` añadidos siempre por el código, además de lo que escriba el modelo.
+6. `scripts/fase3b_real.py`: prueba sin LLM y 3 casos del agente contra la hoja (ENV-1001, ENV-1002, ENV-1006).
+
+**Conceptos:** acciones irreversibles (prevenir frente a detectar), modo pruebas o sandbox, validación de entradas, autenticación por API key y por token, qué hacer cuando un proveedor externo falla, por qué los motivos que lee el humano no deben depender solo del modelo.
+**Romper a propósito:** API key de Resend errónea; `chat_id` de Telegram erróneo; el modelo intenta enviar un email cuando las reglas dicen que no.
+**Preguntas de repaso:** ¿qué pasa si el proveedor de email cae a mitad de un caso? ¿Por qué comprobar el email antes de enviarlo si ya hay guardarraíl? ¿Cómo evitas avisar dos veces al humano?
+**Hecho cuando:** con `EMAIL_MODE=resend` y `NOTIFY_MODE=telegram` llegan el email y el aviso de los 3 casos tal como se espera; con los modos simulados todo sigue funcionando.
 
 ---
 
