@@ -15,7 +15,7 @@ import time
 from google import genai
 
 from app import tools
-from app.agent import handle_shipment
+from app.agent import describe_failed_calls, handle_shipment
 from app.tools import is_judgment
 from app.config import load_config
 
@@ -87,6 +87,8 @@ def main() -> None:
         print(f"\nModel: {run.model_used} | rounds: {run.iterations} "
               f"| limit hit: {run.hit_iteration_limit}")
         print("Tools used: " + " -> ".join(call.name for call in run.tool_calls))
+        for line in describe_failed_calls(run):  # arguments + error of each failure
+            print(line)
         print(f"Guardrail intervened: {guard.intervened}")
         for item in guard.corrections:
             print(f"  correction: {item}")

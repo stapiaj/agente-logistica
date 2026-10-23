@@ -8,6 +8,7 @@ Agent loop (manual, so every step is visible):
   4. Stop anyway after MAX_ITERATIONS rounds.
 """
 
+import inspect
 import sys
 from dataclasses import dataclass, field
 
@@ -122,10 +123,28 @@ class AgentRun:
 
 
 def execute_tool(tools: dict, name: str, args: dict) -> dict:
-    """Run the tool the model asked for. Never let an exception stop the loop."""
+    """Run the tool the model asked for. Never let an exception stop the loop.
+
+    Three kinds of failure, told apart on purpose:
+    - unknown tool or arguments that don't match its signature -> the AGENT's
+      mistake ("agent_error"): checked BEFORE calling, so a TypeError raised
+      inside a tool (a real bug or a provider crash) is never blamed on it;
+    - an exception inside the tool -> "technical" (not the agent's fault);
+    - a tool's own validation (e.g. empty subject) -> plain ok=False.
+    """
     tool = tools.get(name)
     if tool is None:
-        return {"ok": False, "error": f"unknown tool {name!r}"}
+        return {"ok": False, "error": f"unknown tool {name!r}, available: {sorted(tools)}",
+                "agent_error": True}
+    signature = inspect.signature(tool)
+    try:
+        signature.bind(**args)  # same check Python does on a call, without calling
+    except TypeError as error:
+        # e.g. the model invents shipment_id or forgets subject. The expected
+        # signature goes back to the model so it can fix the call next round.
+        return {"ok": False,
+                "error": f"invalid arguments for {name}: {error}. Expected: {name}{signature}",
+                "agent_error": True}
     try:
         return tool(**args)
     except Exception as error:  # returned to the model as data, like any error
@@ -274,6 +293,11 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
     technical_failure = bool(failed_tools)
     for name in failed_tools:  # informative, to measure how often providers fail
         record_guardrail(shipment_id, f"technical failure in {name} (not an agent error)")
+    # Agent errors: unknown tool or invalid arguments. Only recorded (the
+    # agent got the error back and could retry): measures how often it fails.
+    invalid_calls = sorted({call.name for call in calls if call.result.get("agent_error")})
+    for name in invalid_calls:
+        record_guardrail(shipment_id, f"agent error: invalid call to {name}")
 
     # 3. Compare. Under-escalating is costly -> fix it. Over-escalating is cheap -> record it.
     must_escalate: list[str] = []
@@ -343,6 +367,23 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
     return report
 
 
+def describe_failed_calls(run: AgentRun) -> list[str]:
+    """One line per failed tool call: arguments, error and whose fault it is."""
+    lines = []
+    for index, call in enumerate(run.tool_calls, 1):
+        if call.result.get("ok") is not False:
+            continue
+        if call.result.get("technical"):
+            kind = "technical"
+        elif call.result.get("agent_error"):
+            kind = "agent: invalid call"
+        else:
+            kind = "rejected by the tool"
+        lines.append(f"  FAILED {index}. {call.name}({call.args}) -> "
+                     f"{call.result.get('error')} [{kind}]")
+    return lines
+
+
 def handle_shipment(
     shipment_id: str,
     client: genai.Client | None = None,
@@ -365,6 +406,8 @@ if __name__ == "__main__":
     print(f"\n--- {sid}: {result.iterations} rounds, limit hit: {result.hit_iteration_limit}, model: {result.model_used}")
     for i, c in enumerate(result.tool_calls, 1):
         print(f"{i}. {c.name}({c.args}) -> ok={c.result.get('ok')}")
+    for line in describe_failed_calls(result):
+        print(line)
     print(f"Final: {result.final_text}")
     print(f"Guardrail intervened: {guard.intervened}")
     for item in guard.corrections:

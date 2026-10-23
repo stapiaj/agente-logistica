@@ -1,0 +1,70 @@
+"""Phase 3b: checks WITHOUT the LLM (no quota used, nothing really sent).
+
+Run from the project root:
+    python -m scripts.fase3b_checks
+
+Each check calls our code directly, the same way the agent loop would,
+and prints OK or FAIL.
+"""
+
+import os
+import sys
+
+# Must be set before importing app (load_dotenv never overrides it):
+# these checks use the in-memory data, never the real Sheet.
+os.environ["DATA_SOURCE"] = "memory"
+
+from app import tools  # noqa: E402
+from app.agent import execute_tool  # noqa: E402
+
+FAILURES: list[str] = []
+
+
+def check(name: str, condition: bool, detail: object = "") -> None:
+    print(f"{'OK  ' if condition else 'FAIL'} {name}" + (f"\n     {detail}" if detail else ""))
+    if not condition:
+        FAILURES.append(name)
+
+
+def check_tool_arguments() -> None:
+    """Decision 3: arguments are validated BEFORE running the tool."""
+    print("\n--- Tool arguments (decision 3) ---")
+    tools.reset_outbox()
+    bound = tools.make_tools("ENV-1001")
+
+    # 1. Invented parameter (the old shipment_id): agent error, not technical.
+    result = execute_tool(bound, "send_customer_email", {
+        "shipment_id": "ENV-1001", "to": "a@b.com", "subject": "s", "body": "b"})
+    check("invented parameter -> agent_error, not technical",
+          result.get("agent_error") and not result.get("technical"), result["error"])
+    check("invented parameter -> the tool did NOT run (no email)", not tools.SENT_EMAILS)
+
+    # 2. Missing required parameter.
+    result = execute_tool(bound, "log_action", {"action": "email_sent"})
+    check("missing parameter -> agent_error", bool(result.get("agent_error")), result["error"])
+
+    # 3. Unknown tool.
+    result = execute_tool(bound, "delete_shipment", {})
+    check("unknown tool -> agent_error", bool(result.get("agent_error")), result["error"])
+
+    # 4. A TypeError INSIDE a tool is still technical (bug or provider crash).
+    def crashing_tool() -> dict:
+        raise TypeError("something broke inside the tool")
+
+    result = execute_tool({"crashing_tool": crashing_tool}, "crashing_tool", {})
+    check("exception inside the tool -> technical",
+          result.get("technical") and not result.get("agent_error"), result["error"])
+
+    # 5. A correct call still works.
+    result = execute_tool(bound, "get_shipment", {})
+    check("valid call -> ok", result.get("ok") is True)
+
+
+def main() -> None:
+    check_tool_arguments()
+    print(f"\n{'All checks passed' if not FAILURES else f'{len(FAILURES)} check(s) FAILED'}")
+    sys.exit(1 if FAILURES else 0)
+
+
+if __name__ == "__main__":
+    main()
