@@ -14,11 +14,14 @@ import sys
 # these checks use the in-memory data, never the real Sheet.
 os.environ["DATA_SOURCE"] = "memory"
 os.environ["EMAIL_MODE"] = "simulated"  # never a real email from these checks
+os.environ["NOTIFY_MODE"] = "simulated"  # never a real Telegram message either
 
 from app import tools  # noqa: E402
 from app.agent import execute_tool  # noqa: E402
 from app.config import load_resend_config  # noqa: E402
 from app.integrations.email import apply_test_mode  # noqa: E402
+from app.integrations import telegram  # noqa: E402
+import httpx  # noqa: E402
 
 FAILURES: list[str] = []
 
@@ -132,10 +135,39 @@ def check_email_guard() -> None:
           result.get("refused_by_rules") and not tools.SENT_EMAILS, result.get("error"))
 
 
+def check_telegram_helpers() -> None:
+    """T5: long alerts are split (not cut) and the token never shows in errors."""
+    print("\n--- Telegram helpers (T5) ---")
+    short = "short alert"
+    check("short alert -> one message, unchanged", telegram.split_message(short) == [short])
+
+    long_text = "\n".join(f"line {i}: " + "x" * 80 for i in range(120))  # ~10.800 chars
+    parts = telegram.split_message(long_text)
+    check("long alert -> several parts, each <= 4096",
+          len(parts) > 1 and all(len(p) <= telegram.MAX_LENGTH for p in parts),
+          [len(p) for p in parts])
+    check("parts numbered (1/n)...(n/n)",
+          parts[0].startswith(f"(1/{len(parts)})") and parts[-1].startswith(f"({len(parts)}/"))
+    check("nothing lost when splitting",
+          all(f"line {i}:" in "".join(parts) for i in range(120)))
+
+    token = "123456:FAKE-token"
+    request = httpx.Request("POST", f"https://api.telegram.org/bot{token}/sendMessage")
+    response = httpx.Response(401, text=f"Unauthorized for bot{token}", request=request)
+    try:
+        telegram.raise_for_error(response, token)
+        message = ""
+    except telegram.TelegramError as error:
+        message = str(error)
+    check("401 -> readable error", "wrong TELEGRAM_BOT_TOKEN" in message, message)
+    check("token never shown in the error", token not in message)
+
+
 def main() -> None:
     check_tool_arguments()
     check_email_test_mode()
     check_email_guard()
+    check_telegram_helpers()
     print(f"\n{'All checks passed' if not FAILURES else f'{len(FAILURES)} check(s) FAILED'}")
     sys.exit(1 if FAILURES else 0)
 

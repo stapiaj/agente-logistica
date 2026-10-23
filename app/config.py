@@ -94,3 +94,33 @@ def load_resend_config() -> tuple[str, str, str]:
         sys.exit("Missing EMAIL_TEST_RECIPIENT in .env: nothing is sent (fail closed). "
                  "Real customers are only emailed with EMAIL_ALLOW_REAL_RECIPIENTS=true")
     return api_key, sender, test_recipient
+
+
+VALID_NOTIFY_MODES = ("simulated", "telegram")
+
+
+def load_notify_mode() -> str:
+    """How human alerts go out: "simulated" (printed only) or "telegram" (real).
+
+    Empty -> "simulated". Anything else stops the program (like EMAIL_MODE).
+    """
+    load_dotenv()
+    mode = os.getenv("NOTIFY_MODE", "").strip().lower() or "simulated"
+    if mode not in VALID_NOTIFY_MODES:
+        sys.exit(f"Invalid NOTIFY_MODE={mode!r} in .env, use one of {VALID_NOTIFY_MODES}")
+    return mode
+
+
+def load_telegram_config(need_chat_id: bool = True) -> tuple[str, str]:
+    """Bot token (a secret: whoever has it controls the bot) and the chat id.
+
+    need_chat_id=False only to FIND the chat id (it isn't known yet).
+    """
+    load_dotenv()
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    if not token:
+        sys.exit("Missing TELEGRAM_BOT_TOKEN in .env (needed with NOTIFY_MODE=telegram)")
+    if need_chat_id and not chat_id:
+        sys.exit("Missing TELEGRAM_CHAT_ID in .env: run python -m app.integrations.telegram --find-chat-id")
+    return token, chat_id

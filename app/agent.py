@@ -345,12 +345,35 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
     # Only alert if the human doesn't have the case yet: never two alerts for
     # one shipment. If the agent already escalated, the discrepancies above
     # are recorded and that's all.
+    # The agent's own alert failed (e.g. Telegram down): its message and its
+    # email draft would be lost, so the guardrail tries once more with them.
+    # A duplicate alert is cheap (unlike a duplicate email to a customer).
+    failed_alert = next((call for call in calls
+                         if call.name == "notify_human" and call.result.get("technical")), None)
+    if failed_alert and not did_escalate:
+        must_escalate.append("the agent's alert could not be delivered (technical failure)")
+
     if must_escalate and not did_escalate:
         reason = " | ".join(must_escalate)
-        deliver_alert(shipment_id, f"[GUARDRAIL] {reason}")
-        record_action(shipment_id, "escalated", f"guardrail correction: {reason}",
-                      "escalated by code, the agent did not do it")
-        report.corrections.append(f"escalated by code: {reason}")
+        message = f"[GUARDRAIL] {reason}"
+        draft = ""
+        if failed_alert:
+            message += f"\n\nAgent's message: {failed_alert.args.get('message', '')}"
+            draft = failed_alert.args.get("email_draft", "")
+        try:
+            deliver_alert(shipment_id, message, draft)
+        except Exception as error:
+            # The channel to reach the human is the one failing: never crash,
+            # leave it in the log (last resort) and say it loudly.
+            detail = f"{type(error).__name__}: {error}"
+            print(f"\n!!! HUMAN ALERT NOT DELIVERED for {shipment_id}: {detail}\n")
+            record_action(shipment_id, "error", f"human alert could NOT be delivered: {reason}",
+                          detail)
+            report.corrections.append(f"alert by code FAILED ({detail}): {reason}")
+        else:
+            record_action(shipment_id, "escalated", f"guardrail correction: {reason}",
+                          "escalated by code, the agent did not do it")
+            report.corrections.append(f"escalated by code: {reason}")
 
     # Rule 4: every case leaves a trace. If the agent logged nothing, code does.
     if not did_log:

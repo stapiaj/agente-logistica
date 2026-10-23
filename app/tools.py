@@ -23,7 +23,7 @@ the guardrail reads them afterwards.
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from app.config import load_email_mode
+from app.config import load_email_mode, load_notify_mode
 from app.data_source import get_data_source
 from app.rules import evaluate
 
@@ -102,13 +102,30 @@ def deliver_alert(shipment_id: str, message: str, email_draft: str = "") -> dict
     """
     if not message or not message.strip():
         return {"ok": False, "error": "message is required"}
+    text = format_alert(shipment_id, message, email_draft)
+    if load_notify_mode() == "telegram":
+        # Imported only when needed. If Telegram fails this RAISES ->
+        # "technical" in the loop; the guardrail protects its own call.
+        from app.integrations import telegram
+
+        parts = telegram.send_message(text)
+        status = f"sent via Telegram ({parts} message(s))"
+    else:
+        status = "notified (simulated)"
+    # Only counts as delivered once the channel accepted it.
     HUMAN_NOTIFICATIONS.append(
         {"shipment_id": shipment_id, "message": message, "email_draft": email_draft or ""}
     )
-    print(f"[HUMAN ALERT] {shipment_id} | {message}")
-    if email_draft:
-        print(f"[DRAFT FOR REVIEW, NOT SENT]\n{email_draft}\n")
-    return {"ok": True, "status": "notified (simulated)"}
+    print(f"\n[HUMAN ALERT] {status}\n{text}\n")
+    return {"ok": True, "status": status}
+
+
+def format_alert(shipment_id: str, message: str, email_draft: str = "") -> str:
+    """The text the human reads (plain text: same in Telegram and on screen)."""
+    text = f"[ESCALATION] Shipment {shipment_id}\n\n{message.strip()}"
+    if email_draft and email_draft.strip():
+        text += f"\n\n--- EMAIL DRAFT (NOT SENT) ---\n{email_draft.strip()}"
+    return text
 
 
 def is_judgment(message: str) -> bool:
