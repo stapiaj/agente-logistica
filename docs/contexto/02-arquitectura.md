@@ -4,25 +4,35 @@
 
 ```mermaid
 flowchart TD
-    S["Google Sheet<br/>(sistema logístico simulado)"] -- "webhook (Apps Script)<br/>cuando estado = retrasado" --> API
+    S["Google Sheet<br/>(sistema logístico simulado)"] -- "webhook (Apps Script, activador instalable)<br/>cuando status pasa a retrasado<br/>X-Webhook-Secret + {shipment_id, event_id}" --> API
     subgraph Render["Servicio en la nube (Render)"]
-        API["API FastAPI<br/>POST /webhook/shipment-delayed"] --> AG["Agente IA<br/>Gemini + tool calling"]
+        API["API FastAPI<br/>POST /webhook/shipment-delayed"] --> C1{"¿secreto?"}
+        C1 -- no --> R401["401"]
+        C1 -- sí --> C2{"¿cuerpo válido?"}
+        C2 -- no --> R422["422"]
+        C2 -- sí --> C3{"¿event_id ya visto?<br/>memoria + pestaña eventos"}
+        C3 -- sí --> R200["200 already_processed"]
+        C3 -- "no se puede comprobar" --> R503["503 retry later"]
+        C3 -- "no: se apunta" --> R202["202 accepted"]
+        R202 -. "segundo plano<br/>(un agente cada vez)" .-> AG["Agente IA<br/>Gemini + tool calling<br/>+ guardarraíl"]
     end
     AG --> T1["get_shipment<br/>lee envío y cliente"]
-    AG --> T2["send_customer_email<br/>Resend"]
+    AG --> T2["send_customer_email<br/>Resend + Idempotency-Key"]
     AG --> T3["notify_human<br/>bot de Telegram"]
     AG --> T4["log_action<br/>hoja log_acciones"]
     T1 -.-> S
     T4 -.-> S
+    C3 -.-> S
 ```
 
 ## Flujo
 
-1. Alguien cambia el `estado` de un envío a `retrasado` en la Google Sheet.
-2. Un **Apps Script** (trigger `onEdit`) envía un **webhook** (POST con JSON) a la API, con un token secreto en la cabecera.
-3. La **API** valida el token y el JSON y llama al agente con el `shipment_id`.
-4. El **agente** (LLM con herramientas) decide los pasos: consulta el envío y el cliente, aplica las reglas de negocio, envía el email, escala si hace falta y registra la acción.
-5. La API responde `200` con un resumen de lo que hizo.
+1. Alguien cambia el `status` de un envío a `retrasado` en la Google Sheet.
+2. Un **Apps Script** (`apps_script/webhook.gs`, activador **instalable**: el `onEdit` simple no puede llamar a URLs externas) envía un **webhook**: POST con JSON `{shipment_id, event_id}` y el secreto compartido en la cabecera `X-Webhook-Secret`. El `event_id` es único por cada cambio a `retrasado` y se reutiliza en los reintentos de ese mismo aviso.
+3. La **API** comprueba, en este orden: el secreto (`compare_digest`; si falta o no coincide → `401`), el cuerpo con pydantic (→ `422`) y si el `event_id` ya llegó antes (→ `200 already_processed`, sin agente). Si no puede comprobarlo porque la hoja no responde → `503` y tampoco ejecuta el agente.
+4. Si el aviso es nuevo, lo apunta en la pestaña `eventos` y responde **`202 accepted` al momento**: quien avisa no espera al agente (tarda segundos) ni reintenta por un timeout.
+5. En **segundo plano** (`BackgroundTasks`, un agente cada vez), el **agente** (LLM con herramientas) consulta el envío y el cliente, aplica las reglas, envía el email (con clave de idempotencia de Resend derivada del `event_id`), escala si hace falta y registra la acción. Después, el **guardarraíl** comprueba que no falte nada. El resultado va a la hoja, al email y a Telegram, no a quien avisó.
+6. Si la API no responde o devuelve `503`/5xx, el script de la hoja reintenta (hasta 3 veces, 5 s y 10 s) **con el mismo `event_id`**: reintentar es seguro porque la API es idempotente. Con `401`/`422` no reintenta (no se arreglaría solo).
 
 ## Componentes y stack
 
@@ -46,7 +56,8 @@ Todo es gratuito. Limitaciones conocidas: Render gratuito se "duerme" tras ~15 m
 ```
 Agente-logistica/
 ├── app/
-│   ├── main.py            # API FastAPI (endpoints)
+│   ├── main.py            # API FastAPI: /health y el webhook (secreto, validación, 202 + agente en segundo plano)
+│   ├── events.py          # Idempotencia del webhook: event_id ya recibidos (memoria + fuente de datos)
 │   ├── agent.py           # Bucle del agente, prompt del sistema y guardarraíl
 │   ├── tools.py           # Definición de las herramientas
 │   ├── rules.py           # Reglas de negocio en código (única fuente de verdad; las usa el guardarraíl)
@@ -72,7 +83,7 @@ Agente-logistica/
 ## Decisiones de diseño (y por qué)
 
 - **Google Sheets como "sistema del cliente":** gratis, visible y editable a mano para la demo; además obliga a hacer una integración real con API y autenticación.
-- **Patrón adaptador para los datos del cliente:** `mock_data.py` e `integrations/sheets.py` ofrecen las mismas tres funciones (`find_shipment`, `find_customer`, `append_log`) con la misma forma de datos, y `DATA_SOURCE` en `.env` elige cuál usar sin tocar código. Las herramientas, el agente y `rules.py` no saben de dónde vienen los datos: otro sistema (un ERP, una base de datos) solo necesita su propio adaptador. El adaptador **traduce, no decide**: convierte el texto de la hoja a tipos y, si un valor no se puede convertir, lo pasa tal cual para que `rules.py` lo marque como dato incoherente.
+- **Patrón adaptador para los datos del cliente:** `mock_data.py` e `integrations/sheets.py` ofrecen las mismas funciones (`find_shipment`, `find_customer`, `append_log` y, para el webhook, `find_event`, `append_event`) con la misma forma de datos, y `DATA_SOURCE` en `.env` elige cuál usar sin tocar código. Las herramientas, el agente y `rules.py` no saben de dónde vienen los datos: otro sistema (un ERP, una base de datos) solo necesita su propio adaptador. El adaptador **traduce, no decide**: convierte el texto de la hoja a tipos y, si un valor no se puede convertir, lo pasa tal cual para que `rules.py` lo marque como dato incoherente.
 - **Acceso mínimo a la hoja:** la cuenta de servicio no tiene roles en el proyecto de Google Cloud, solo acceso de editor a esta hoja, y su token solo pide el permiso de hojas de cálculo. La clave JSON nunca va a Git.
 - **Fallos del sistema del cliente sin tumbar el servicio:** si la hoja no responde, el error llega al agente como fallo técnico, el guardarraíl escala desde el código si nadie lo hizo, y una fila de log solo cuenta como guardada si la hoja la aceptó.
 - **Reglas de negocio en el prompt + herramientas pequeñas:** el LLM decide, pero cada acción pasa por una función controlada. Es el patrón habitual en agentes empresariales.
@@ -80,5 +91,9 @@ Agente-logistica/
 - **El modelo no escribe los identificadores:** el `shipment_id` lo inyecta el código en las herramientas (`make_tools`), por ejecución. Lo que el modelo no escribe no lo puede cambiar; y crear las herramientas por ejecución (no con una variable global) evita mezclar ids cuando la API atienda varias peticiones a la vez.
 - **Criterio con red (regla 6):** ante algo grave que las reglas no prevén, el agente escala por criterio (`JUDGMENT:`) y no envía el email: el humano recibe un borrador y decide. Se registra para medirlo y lo que se repita pasa a `rules.py`.
 - **Escalado a humano (human-in-the-loop):** en procesos reales el agente no lo resuelve todo; saber cuándo escalar es parte del diseño.
-- **Token secreto en el webhook:** la API es pública; sin él cualquiera podría disparar el agente.
+- **Secreto compartido en el webhook:** la API es pública; sin él cualquiera podría disparar el agente (y hacer que envíe emails). Se compara con `secrets.compare_digest` (tiempo constante: el tiempo de respuesta no revela cuánto acertó un atacante) y se comprueba **antes** que el cuerpo (dependencia de FastAPI), para no dar pistas de la forma del aviso; solo un JSON mal formado da `422` sin secreto, porque FastAPI lo lee antes. Sin `WEBHOOK_SECRET` (o con menos de 32 caracteres) el servidor no arranca: falla cerrado. En la hoja, el secreto va en las Propiedades del script, nunca en el código.
+- **Webhook (push) en vez de consultas periódicas (pull):** el sistema del cliente avisa cuando pasa algo; nadie tiene que preguntar "¿hay algo nuevo?" cada cierto tiempo.
+- **Responder 202 y trabajar en segundo plano:** el agente tarda segundos; si quien avisa esperara, podría cansarse y reenviar el aviso. Los agentes se ejecutan **de uno en uno** (candado) porque la "bandeja de salida" de `tools.py` es compartida. Suficiente para este volumen; en producción, una cola de tareas. Limitación: si el servicio se reinicia a mitad, ese trabajo se pierde.
+- **Idempotencia en dos niveles:** un aviso puede llegar dos veces (reintentos, el servicio despertando en Render). (1) La API no procesa dos veces el mismo `event_id`: lo busca en memoria (frena dos avisos idénticos a la vez) y en la pestaña `eventos` (sobrevive a los reinicios de Render; la memoria y el disco se borran); con `DATA_SOURCE=memory`, solo memoria. Se apunta **al recibirlo**: como mucho una vez; si el agente falla a mitad, un reintento no lo repite y lo revisa un humano (un email duplicado es peor que un caso pendiente). (2) El email lleva `Idempotency-Key: shipment-delayed/<event_id>`: Resend no reenvía la misma clave en 24 h (y con otro contenido da `409` y no envía). Cubre lo que (1) no ve: el modelo llamando dos veces a la herramienta o un reproceso manual.
+- **Ante la duda, no actuar (503):** si la hoja no responde no se puede saber si el aviso está repetido; mejor tarde (quien avisa reintenta) que un email duplicado.
 - **Registro de cada acción:** trazabilidad y auditoría, imprescindibles para que un cliente confíe en el agente.
