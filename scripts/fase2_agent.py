@@ -38,6 +38,9 @@ EXPECTED = {
 # appear: that catches the agent using judgment to skip normal emails.
 JUDGMENT_CASES = {"ENV-1006"}
 
+# Escalated WITHOUT email: the alert must carry the email draft (decision 2, phase 3b).
+DRAFT_CASES = {"ENV-1004", "ENV-1006"}
+
 
 def yes_no(value: bool) -> str:
     return "yes" if value else "no"
@@ -72,11 +75,14 @@ def main() -> None:
         logged = {row["action"] for row in tools.ACTION_LOG}
         judged = any(is_judgment(n["message"]) and n["email_draft"].strip()
                      for n in tools.HUMAN_NOTIFICATIONS)
+        drafted = any(n["email_draft"].strip() for n in tools.HUMAN_NOTIFICATIONS)
 
         exp_email, exp_escalate, exp_logs = EXPECTED[shipment_id]
         exp_judged = shipment_id in JUDGMENT_CASES
+        exp_draft = shipment_id in DRAFT_CASES
         matches = (emailed == exp_email and escalated == exp_escalate
-                   and exp_logs <= logged and judged == exp_judged)
+                   and exp_logs <= logged and judged == exp_judged
+                   and (drafted or not exp_draft))
         if not matches:
             verdict = "CHECK"
         elif guard.intervened:
@@ -97,7 +103,8 @@ def main() -> None:
         print(f"Email: {yes_no(emailed)} (expected {yes_no(exp_email)}) | "
               f"Escalated: {yes_no(escalated)} (expected {yes_no(exp_escalate)}) | "
               f"Log: {sorted(logged)} (must include {sorted(exp_logs)}) | "
-              f"Judgment+draft: {yes_no(judged)} (expected {yes_no(exp_judged)})")
+              f"Judgment+draft: {yes_no(judged)} (expected {yes_no(exp_judged)}) | "
+              f"Draft: {yes_no(drafted)} (required: {yes_no(exp_draft)})")
         print(f"Result: {verdict}")
         summary.append((shipment_id, yes_no(emailed), yes_no(escalated),
                         "yes" if guard.intervened else "no", verdict))

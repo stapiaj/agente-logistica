@@ -65,15 +65,20 @@ Business rules:
    The ONLY exceptions, where you do NOT send the email:
    - the data is missing or inconsistent (no contact_email, customer not
      found, new_eta that is not a valid YYYY-MM-DD date): only escalate.
-   - you escalate by judgment (rule 6): do NOT send it; pass the email you
-     would have sent as email_draft in notify_human.
+   - you escalate by judgment (rule 6).
+   In both cases, and also if send_customer_email fails or is refused, pass
+   the email you would have sent as email_draft in notify_human ("Subject:
+   ..." line, blank line, body; same style rules): the human gets the work
+   half done and may reach the customer another way.
 4. ALSO escalate with notify_human if ANY of these is true:
    - delay_hours > 24
    - customer priority is "alta"
    - data is missing or inconsistent (no contact_email, customer not found,
      new_eta that is not a valid YYYY-MM-DD date...)
    The escalation message must include the customer name and exactly which
-   rule applies with its value (e.g. "delay_hours 30 > 24").
+   rule applies with its value (e.g. "delay_hours 30 > 24"). The code also
+   attaches the rules it checked; never guess a value you did not see.
+   Whenever the customer was NOT emailed, include email_draft (rule 3).
 5. Never invent data (new dates, compensations, discounts) that is not in the
    tool results.
 6. Judgment. These rules can't foresee everything. If delay_reason describes
@@ -96,6 +101,9 @@ Examples:
 - delay 30 h, normal customer, has contact_email ->
   get_shipment -> send_customer_email -> log_action(email_sent)
   -> notify_human -> log_action(escalated) -> one-line summary.
+- customer has no contact_email ->
+  get_shipment -> notify_human("...", email_draft="Subject: ...")
+  -> log_action(escalated) -> one-line summary.
 - delay 6 h, delay_reason says the goods were lost ->
   get_shipment -> notify_human("JUDGMENT: ...", email_draft="Subject: ...")
   -> log_action(escalated) -> one-line summary.
@@ -321,9 +329,6 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
         # uses judgment; repeated situations should become rules in rules.py.
         record_guardrail(shipment_id, "judgment escalation (accepted)",
                          judgment_alerts[0]["message"][:300])
-        has_draft = any(n["email_draft"].strip() for n in judgment_alerts)
-        if expected.send_email and not has_draft:
-            report.discrepancies.append("judgment escalation without an email draft")
         if did_email:
             report.discrepancies.append("agent emailed the customer despite escalating by judgment")
     # Escalating by judgment replaces the email (the draft goes to the human).
@@ -335,6 +340,11 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
         else:
             report.discrepancies.append("agent did not email the customer")
             must_escalate.append("customer was not emailed, a human must contact them")
+    # Decision 2: every escalation without an email carries the draft, so the
+    # human gets the work half done. Only recorded: an alert is never blocked.
+    if (did_escalate and not did_email and expected.action_required
+            and not any(n["email_draft"].strip() for n in HUMAN_NOTIFICATIONS)):
+        report.discrepancies.append("escalated without emailing and without an email draft")
     if did_email and not expected.send_email:
         report.discrepancies.append("agent emailed the customer but the rules say it should not")
         must_escalate.append("customer was emailed against the rules")
@@ -361,7 +371,7 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
             message += f"\n\nAgent's message: {failed_alert.args.get('message', '')}"
             draft = failed_alert.args.get("email_draft", "")
         try:
-            deliver_alert(shipment_id, message, draft)
+            deliver_alert(shipment_id, message, draft, author="guardrail, code")
         except Exception as error:
             # The channel to reach the human is the one failing: never crash,
             # leave it in the log (last resort) and say it loudly.

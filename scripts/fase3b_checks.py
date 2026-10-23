@@ -163,11 +163,46 @@ def check_telegram_helpers() -> None:
     check("token never shown in the error", token not in message)
 
 
+def check_alert_content() -> None:
+    """T6 (decision 5): every alert carries the reasons from rules.py."""
+    print("\n--- Alert content (T6) ---")
+    lines = tools.rule_lines("ENV-1002")
+    check("ENV-1002 -> rules say delay_hours 30 > 24", "delay_hours 30 > 24" in lines, lines)
+    lines = tools.rule_lines("ENV-1006")
+    check("ENV-1006 (judgment) -> 'none: no rule requires escalation'",
+          lines[0].startswith("none: no rule"), lines)
+
+    text = tools.format_alert("ENV-1002", "agent text", "Subject: S\n\nBody",
+                              tools.rule_lines("ENV-1002"))
+    check("alert text: rules block, then agent's message, then draft",
+          text.index("Rules (checked by code)") < text.index("Message (agent)")
+          < text.index("EMAIL DRAFT (NOT SENT)"), text)
+
+    # Data source down: the alert must STILL go out, saying the rules couldn't be checked.
+    original = tools.lookup_shipment
+
+    def source_down(shipment_id: str) -> dict:
+        raise ConnectionError("Sheet unreachable")
+
+    tools.lookup_shipment = source_down
+    try:
+        tools.reset_outbox()
+        result = tools.deliver_alert("ENV-1002", "agent text")
+        lines = tools.rule_lines("ENV-1002")
+    finally:
+        tools.lookup_shipment = original
+    check("source down -> alert still delivered", result.get("ok") is True and
+          bool(tools.HUMAN_NOTIFICATIONS), result)
+    check("source down -> says the rules could not be checked",
+          lines[0].startswith("rules could not be checked"), lines)
+
+
 def main() -> None:
     check_tool_arguments()
     check_email_test_mode()
     check_email_guard()
     check_telegram_helpers()
+    check_alert_content()
     print(f"\n{'All checks passed' if not FAILURES else f'{len(FAILURES)} check(s) FAILED'}")
     sys.exit(1 if FAILURES else 0)
 

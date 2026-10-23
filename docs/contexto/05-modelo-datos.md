@@ -46,10 +46,12 @@
 3. **Escala a un humano** (Telegram) si se cumple cualquiera de estas condiciones:
    - `delay_hours > 24`
    - `priority = alta`
-   - Faltan datos o son incoherentes (no hay email, no existe el cliente, `new_eta` con formato inválido…). En ese caso **no** envía email al cliente; solo escala.
+   - Faltan datos o son incoherentes (no hay email, no existe el cliente, `new_eta` con formato inválido…). En ese caso **no** envía email al cliente: escala con el borrador del email en `email_draft`.
+   - El aviso lleva siempre, añadidos por el código, los motivos según `rules.py` (bloque "Rules (checked by code)"), separados del mensaje del modelo: el humano no depende solo de la interpretación del modelo.
 4. **Siempre** registra cada acción en `log_acciones` con el motivo.
 5. Nunca inventa datos (plazos, compensaciones, etc.) que no estén en la hoja.
 6. **Escalado por criterio.** Si `delay_reason` describe algo grave que las reglas no cubren (robo, pérdida o daño de la mercancía, accidente, imposibilidad de estimar la entrega), escala igualmente, aunque también aplique otra regla. El aviso empieza por `JUDGMENT:` y explica por qué. **No** envía el email: lo incluye como borrador (`email_draft`, empezando por `Subject:`) en el aviso, y el humano decide. El guardarraíl lo acepta como escalado legítimo y lo registra (`guardrail`) para poder medirlo; las situaciones que se repitan pasarán a `rules.py`.
+7. **Borrador en todo escalado sin email** (criterio, datos incoherentes, cliente sin email, email fallido o rechazado): el aviso incluye en `email_draft` el email que se habría enviado, para que el humano reciba el trabajo medio hecho.
 
 ### Guardarraíl (en código, tras cada ejecución)
 
@@ -59,7 +61,10 @@ Compara lo que hizo el agente (y lo que intentó) con lo que dice `rules.py`:
 - **Escaló sin regla, no envió email debiendo, o lo envió sin deber:** registra la discrepancia (`guardrail`).
 - **Nunca dos avisos:** si el agente ya escaló, el guardarraíl solo registra.
 - **Fallo técnico de una herramienta** (p. ej. el proveedor de email caído): es motivo legítimo de escalado, no cuenta como discrepancia; se registra como informativo. Si el agente no escaló, escala el código.
-- **Escalado por criterio (`JUDGMENT:`):** aceptado y registrado siempre; discrepancia si falta el borrador o si además envió el email.
+- **Escalado por criterio (`JUDGMENT:`):** aceptado y registrado siempre; discrepancia si además envió el email.
+- **Escalado sin email y sin borrador:** discrepancia registrada (nunca se bloquea un aviso).
+- **Errores del agente** (argumentos inválidos, email rechazado por las reglas): registrados (`guardrail`) para medirlos.
+- **Si el aviso del agente falla** (Telegram caído): el guardarraíl lo reintenta una vez con su mensaje y borrador; si también falla, fila `error` en el log.
 - **Sin log:** lo escribe el código.
 
 ## Herramientas del agente
@@ -70,7 +75,7 @@ Cada ejecución trata **un solo envío**. El código crea las herramientas con e
 |---|---|---|---|
 | `get_shipment()` | ninguna (el id lo pone el código) | datos del envío + datos del cliente, o error si no existe | Solo lectura |
 | `send_customer_email(subject, body)` | asunto y cuerpo (el destinatario, `contact_email`, lo pone el código) | ok / error | Antes de enviar consulta `rules.py` y se niega si no toca email (o si ya se escaló por criterio); si toca, envía (Resend o simulado, según `EMAIL_MODE`) |
-| `notify_human(message, email_draft="")` | texto del aviso; borrador opcional del email no enviado (regla 6) | ok / error | Mensaje al responsable (Telegram); el código añade el `shipment_id` |
+| `notify_human(message, email_draft="")` | texto del aviso; borrador del email no enviado (obligatorio en todo escalado sin email) | ok / error | Mensaje al responsable (Telegram o simulado, según `NOTIFY_MODE`); el código añade el `shipment_id` y los motivos según `rules.py` |
 | `log_action(action, reason, details)` | campos del log (el id lo pone el código) | ok / error | Añade una fila a `log_acciones` |
 
 Si una herramienta lanza una excepción, el error vuelve al modelo marcado como `technical` (fallo del sistema, no del agente). Si los argumentos no encajan con la firma, la herramienta no existe o `send_customer_email` se niega por las reglas, vuelve como `agent_error` (error del agente) y la herramienta no llega a actuar.
@@ -82,7 +87,7 @@ Si una herramienta lanza una excepción, el error vuelve al modelo marcado como 
 | ENV-1001 | Retraso 6 h, cliente normal | Email + log |
 | ENV-1002 | Retraso 30 h, cliente normal | Email + escalado + log |
 | ENV-1003 | Retraso 4 h, cliente prioridad alta | Email + escalado + log |
-| ENV-1004 | Cliente sin email | Sin email; escalado + log de datos incompletos |
+| ENV-1004 | Cliente sin email | Sin email; escalado con borrador + log de datos incompletos |
 | ENV-9999 | No existe | Log de error, sin acciones externas |
 | ENV-1005 | Estado `en_transito` | Log `no_action` |
 | ENV-1006 | Retraso 6 h, cliente normal, camión robado (motivo con detalles internos) | Escalado por criterio (`JUDGMENT:`), **sin email**, borrador en el aviso sin detalles internos; log `escalated` + `guardrail` (criterio aceptado) |
