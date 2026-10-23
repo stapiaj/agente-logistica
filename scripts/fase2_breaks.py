@@ -36,7 +36,7 @@ def break_bad_id() -> str:
 def break_tool_crash() -> str:
     """The email provider is down: the tool raises instead of returning."""
 
-    def broken_email(to: str, subject: str, body: str) -> dict:
+    def broken_email(to: str, subject: str, body: str, idempotency_key: str = "") -> dict:
         raise ConnectionError("email provider unreachable")
 
     # The model's send_customer_email calls tools.deliver_email by name at run
@@ -50,8 +50,8 @@ def break_vague_tool() -> str:
     vague = "Sends a message. Use it to notify about the shipment."
     original_make_tools = agent.make_tools
 
-    def make_vague_tools(shipment_id: str) -> dict:
-        built = original_make_tools(shipment_id)
+    def make_vague_tools(shipment_id: str, event_id: str = "") -> dict:
+        built = original_make_tools(shipment_id, event_id)
         built["notify_human"].__doc__ = vague
         return built
 

@@ -37,7 +37,8 @@ class ShipmentDelayedEvent(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     shipment_id: str = Field(min_length=1, examples=["ENV-1001"])
-    event_id: str = Field(min_length=1, examples=["evt-2026-10-23-0001"])
+    # max_length: the email idempotency key is built from it (Resend: <= 256).
+    event_id: str = Field(min_length=1, max_length=200, examples=["evt-2026-10-23-0001"])
 
 
 def verify_secret(
@@ -81,7 +82,7 @@ def run_agent_job(shipment_id: str, event_id: str) -> None:
     with AGENT_LOCK:
         print(f"[agent] start {shipment_id} (event {event_id})", flush=True)
         try:
-            run, report = handle_shipment(shipment_id)
+            run, report = handle_shipment(shipment_id, event_id=event_id)
         except (Exception, SystemExit):
             print(f"[agent] FAILED {shipment_id} (event {event_id}):", flush=True)
             traceback.print_exc()
