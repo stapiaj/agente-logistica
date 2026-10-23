@@ -16,6 +16,8 @@ os.environ["DATA_SOURCE"] = "memory"
 
 from app import tools  # noqa: E402
 from app.agent import execute_tool  # noqa: E402
+from app.config import load_resend_config  # noqa: E402
+from app.integrations.email import apply_test_mode  # noqa: E402
 
 FAILURES: list[str] = []
 
@@ -60,8 +62,44 @@ def check_tool_arguments() -> None:
     check("valid call -> ok", result.get("ok") is True)
 
 
+def check_email_test_mode() -> None:
+    """T3: in test mode every email is redirected and says who it was for."""
+    print("\n--- Email test mode (T3) ---")
+    to, subject, body = apply_test_mode("cliente@example.com", "Retraso", "Hola", "yo@test.com")
+    check("redirected to the test inbox", to == "yo@test.com", to)
+    check("subject marked [TEST]", subject.startswith("[TEST]"), subject)
+    check("body starts with the original recipient",
+          body.startswith("[TEST MODE] Original recipient: cliente@example.com"))
+    check("without test recipient nothing changes",
+          apply_test_mode("c@x.com", "S", "B", "") == ("c@x.com", "S", "B"))
+
+    # Fail closed: no EMAIL_TEST_RECIPIENT and no explicit switch -> stop.
+    # Fake values in os.environ (load_dotenv never overrides them); the real
+    # ones are restored afterwards. Nothing is sent: we only load the config.
+    names = ("RESEND_API_KEY", "EMAIL_FROM", "EMAIL_TEST_RECIPIENT", "EMAIL_ALLOW_REAL_RECIPIENTS")
+    saved = {name: os.environ.get(name) for name in names}
+    os.environ.update({"RESEND_API_KEY": "fake", "EMAIL_FROM": "a@b.com",
+                       "EMAIL_TEST_RECIPIENT": "", "EMAIL_ALLOW_REAL_RECIPIENTS": ""})
+    try:
+        try:
+            load_resend_config()
+            stopped = False
+        except SystemExit as stop:
+            stopped, reason = True, stop.code
+        check("no test recipient -> stops (fail closed)", stopped, reason if stopped else "")
+        os.environ["EMAIL_ALLOW_REAL_RECIPIENTS"] = "true"
+        check("explicit switch -> allowed", load_resend_config()[2] == "")
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
 def main() -> None:
     check_tool_arguments()
+    check_email_test_mode()
     print(f"\n{'All checks passed' if not FAILURES else f'{len(FAILURES)} check(s) FAILED'}")
     sys.exit(1 if FAILURES else 0)
 

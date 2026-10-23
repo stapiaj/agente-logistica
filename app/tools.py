@@ -15,13 +15,15 @@ Two layers in this file:
   guardrail uses them directly.
 - Tools for the model (make_tools): thin wrappers bound to one shipment.
 
-Nothing is really sent in this phase: emails, alerts and log rows are stored
-in the "outbox" lists below and printed. The guardrail reads them afterwards.
+Emails go out simulated or for real (EMAIL_MODE, phase 3b). Either way,
+what really happened is stored in the "outbox" lists below and printed:
+the guardrail reads them afterwards.
 """
 
 from collections.abc import Callable
 from datetime import datetime, timezone
 
+from app.config import load_email_mode
 from app.data_source import get_data_source
 
 # Actions the AGENT may log (what happened to the shipment).
@@ -68,15 +70,27 @@ def lookup_shipment(shipment_id: str) -> dict:
 
 
 def deliver_email(to: str, subject: str, body: str) -> dict:
-    """Send (simulate) one email. Validates the input, never raises on it."""
+    """Send one email, simulated or real (EMAIL_MODE in .env).
+
+    Bad input -> ok=False (never raises on it). If the real provider fails it
+    RAISES: execute_tool turns that into a "technical" error. The email only
+    goes to SENT_EMAILS once it was really accepted.
+    """
     if not to or "@" not in to:
         return {"ok": False, "error": f"invalid recipient: {to!r}"}
     if not subject or not body:
         return {"ok": False, "error": "subject and body are required"}
-    email = {"to": to, "subject": subject, "body": body}
-    SENT_EMAILS.append(email)
-    print(f"\n[EMAIL -> {to}]\nSubject: {subject}\n{body}\n")
-    return {"ok": True, "status": "sent (simulated)"}
+    if load_email_mode() == "resend":
+        # Imported only when needed: simulated mode works without Resend.
+        from app.integrations import email as email_provider
+
+        message_id = email_provider.send_email(to, subject, body)
+        status = f"sent via Resend (id {message_id})"
+    else:
+        status = "sent (simulated)"
+    SENT_EMAILS.append({"to": to, "subject": subject, "body": body})
+    print(f"\n[EMAIL -> {to}] {status}\nSubject: {subject}\n{body}\n")
+    return {"ok": True, "status": status}
 
 
 def deliver_alert(shipment_id: str, message: str, email_draft: str = "") -> dict:
