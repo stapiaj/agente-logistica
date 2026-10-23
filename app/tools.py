@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 
 from app.config import load_email_mode
 from app.data_source import get_data_source
+from app.rules import evaluate
 
 # Actions the AGENT may log (what happened to the shipment).
 VALID_ACTIONS = {"email_sent", "escalated", "no_action", "error"}
@@ -185,19 +186,43 @@ def make_tools(shipment_id: str) -> dict[str, Callable[..., dict]]:
         """
         return lookup_shipment(shipment_id)
 
-    def send_customer_email(to: str, subject: str, body: str) -> dict:
+    def send_customer_email(subject: str, body: str) -> dict:
         """Send an email to the customer about their delayed shipment.
 
+        The recipient is the customer's contact_email, added automatically:
+        you only write subject and body.
         Use it only for shipments with status "retrasado" whose customer has a
-        contact_email. Do NOT use it if the email is missing or the customer does
-        not exist: escalate instead. `to` must be the customer's contact_email.
+        contact_email and whose data is consistent. Otherwise it is refused:
+        escalate instead, with the email as notify_human's email_draft.
         Write subject and body in the customer's language, greeting the customer
         by name, with line breaks between paragraphs. Explain the delay cause in
         general words, never the internal delay_reason text.
         Do NOT use it when you escalate by judgment (rule 6): put the email in
         notify_human's email_draft instead, so a human reviews it first.
         """
-        return deliver_email(to, subject, body)
+        # PREVENT instead of detect: a real email can't be undone, so code
+        # checks BEFORE sending (the guardrail afterwards could only report it).
+        # 1. Fresh facts, not what the model remembers. If the source is down
+        #    this raises -> "technical" and nothing is sent (fail closed).
+        facts = lookup_shipment(shipment_id)
+        expected = evaluate(facts.get("shipment"), facts.get("customer"))
+        # 2. The rules say no email -> refuse. It's the agent's mistake.
+        if not expected.send_email:
+            why = "; ".join(expected.reasons) or "shipment not found or not delayed"
+            hint = ("escalate with notify_human and put the email in email_draft"
+                    if expected.escalate else "do not email; just log the action")
+            return {"ok": False, "agent_error": True, "refused_by_rules": True,
+                    "error": f"refused: the rules say this customer must NOT be emailed "
+                             f"({why}). Nothing was sent: {hint}."}
+        # 3. Rule 6: rules.py can't see judgment. If the agent already escalated
+        #    by judgment, the email belongs to the human (email_draft).
+        if any(is_judgment(n["message"]) for n in HUMAN_NOTIFICATIONS
+               if n["shipment_id"] == shipment_id):
+            return {"ok": False, "agent_error": True, "refused_by_rules": True,
+                    "error": "refused: you already escalated by judgment (rule 6). Nothing "
+                             "was sent: the email goes as email_draft for a human to review."}
+        # 4. The recipient comes from the data, never from the model.
+        return deliver_email(facts["customer"]["contact_email"], subject, body)
 
     def notify_human(message: str, email_draft: str = "") -> dict:
         """Alert the human supervisor so they take over the case.

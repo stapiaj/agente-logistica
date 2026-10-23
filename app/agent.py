@@ -52,7 +52,8 @@ Business rules:
 3. For delayed shipments ALWAYS email the customer (send_customer_email),
    EVEN WHEN you also escalate: apologise, explain the reason, and state the
    delay (delay_hours) and the original expected_date. Professional tone, in
-   the customer's language ("es" = Spanish, "en" = English).
+   the customer's language ("es" = Spanish, "en" = English). The tool already
+   knows the customer's address: you only write subject and body.
    The reason: delay_reason is an INTERNAL note for our staff. Never copy it.
    Tell the customer the cause in general, customer-friendly words (e.g. "a
    vehicle breakdown", "congestion at the port"), written in the customer's
@@ -295,9 +296,16 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
         record_guardrail(shipment_id, f"technical failure in {name} (not an agent error)")
     # Agent errors: unknown tool or invalid arguments. Only recorded (the
     # agent got the error back and could retry): measures how often it fails.
-    invalid_calls = sorted({call.name for call in calls if call.result.get("agent_error")})
+    invalid_calls = sorted({call.name for call in calls if call.result.get("agent_error")
+                            and not call.result.get("refused_by_rules")})
     for name in invalid_calls:
         record_guardrail(shipment_id, f"agent error: invalid call to {name}")
+    # Email refused BEFORE sending (prevent > detect): nothing reached the
+    # customer, but the agent tried. Recorded separately to measure it.
+    refused = [call for call in calls if call.result.get("refused_by_rules")]
+    if refused:
+        record_guardrail(shipment_id, "agent error: tried to email against the rules (refused)",
+                         refused[0].result["error"][:300])
 
     # 3. Compare. Under-escalating is costly -> fix it. Over-escalating is cheap -> record it.
     must_escalate: list[str] = []
@@ -375,6 +383,8 @@ def describe_failed_calls(run: AgentRun) -> list[str]:
             continue
         if call.result.get("technical"):
             kind = "technical"
+        elif call.result.get("refused_by_rules"):
+            kind = "agent: refused by the rules"
         elif call.result.get("agent_error"):
             kind = "agent: invalid call"
         else:

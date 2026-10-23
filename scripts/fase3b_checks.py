@@ -13,6 +13,7 @@ import sys
 # Must be set before importing app (load_dotenv never overrides it):
 # these checks use the in-memory data, never the real Sheet.
 os.environ["DATA_SOURCE"] = "memory"
+os.environ["EMAIL_MODE"] = "simulated"  # never a real email from these checks
 
 from app import tools  # noqa: E402
 from app.agent import execute_tool  # noqa: E402
@@ -36,7 +37,7 @@ def check_tool_arguments() -> None:
 
     # 1. Invented parameter (the old shipment_id): agent error, not technical.
     result = execute_tool(bound, "send_customer_email", {
-        "shipment_id": "ENV-1001", "to": "a@b.com", "subject": "s", "body": "b"})
+        "shipment_id": "ENV-1001", "subject": "s", "body": "b"})
     check("invented parameter -> agent_error, not technical",
           result.get("agent_error") and not result.get("technical"), result["error"])
     check("invented parameter -> the tool did NOT run (no email)", not tools.SENT_EMAILS)
@@ -97,9 +98,44 @@ def check_email_test_mode() -> None:
                 os.environ[name] = value
 
 
+def send(shipment_id: str) -> dict:
+    """The model's call: only subject and body."""
+    return execute_tool(tools.make_tools(shipment_id), "send_customer_email",
+                        {"subject": "Retraso de su envío", "body": "Hola,\n\nTexto."})
+
+
+def check_email_guard() -> None:
+    """T4 (decisions 1 and 4): recipient from the data, rules checked BEFORE sending."""
+    print("\n--- send_customer_email guard (T4) ---")
+    tools.reset_outbox()
+    result = send("ENV-1001")
+    expected_to = tools.lookup_shipment("ENV-1001")["customer"]["contact_email"]
+    check("ENV-1001 (6 h, normal) -> sent", result.get("ok") is True, result)
+    check("recipient injected by code = customer's contact_email",
+          bool(tools.SENT_EMAILS) and tools.SENT_EMAILS[0]["to"] == expected_to,
+          tools.SENT_EMAILS[0]["to"] if tools.SENT_EMAILS else "no email")
+
+    for shipment_id, case in (("ENV-1004", "customer without email"),
+                              ("ENV-1005", "not delayed"),
+                              ("ENV-9999", "does not exist")):
+        tools.reset_outbox()
+        result = send(shipment_id)
+        check(f"{shipment_id} ({case}) -> refused, agent error, nothing sent",
+              result.get("refused_by_rules") and not result.get("technical")
+              and not tools.SENT_EMAILS, result.get("error"))
+
+    # Rule 6: after a JUDGMENT alert the email goes to the human, not the customer.
+    tools.reset_outbox()
+    tools.deliver_alert("ENV-1006", "JUDGMENT: goods stolen")
+    result = send("ENV-1006")
+    check("after a JUDGMENT alert -> refused, nothing sent",
+          result.get("refused_by_rules") and not tools.SENT_EMAILS, result.get("error"))
+
+
 def main() -> None:
     check_tool_arguments()
     check_email_test_mode()
+    check_email_guard()
     print(f"\n{'All checks passed' if not FAILURES else f'{len(FAILURES)} check(s) FAILED'}")
     sys.exit(1 if FAILURES else 0)
 

@@ -69,11 +69,11 @@ Cada ejecución trata **un solo envío**. El código crea las herramientas con e
 | Herramienta | Entrada | Salida | Efecto |
 |---|---|---|---|
 | `get_shipment()` | ninguna (el id lo pone el código) | datos del envío + datos del cliente, o error si no existe | Solo lectura |
-| `send_customer_email(to, subject, body)` | destinatario, asunto, cuerpo | ok / error | Envía un email (Resend) |
+| `send_customer_email(subject, body)` | asunto y cuerpo (el destinatario, `contact_email`, lo pone el código) | ok / error | Antes de enviar consulta `rules.py` y se niega si no toca email (o si ya se escaló por criterio); si toca, envía (Resend o simulado, según `EMAIL_MODE`) |
 | `notify_human(message, email_draft="")` | texto del aviso; borrador opcional del email no enviado (regla 6) | ok / error | Mensaje al responsable (Telegram); el código añade el `shipment_id` |
 | `log_action(action, reason, details)` | campos del log (el id lo pone el código) | ok / error | Añade una fila a `log_acciones` |
 
-Si una herramienta lanza una excepción, el error vuelve al modelo marcado como `technical` (fallo del sistema, no del agente).
+Si una herramienta lanza una excepción, el error vuelve al modelo marcado como `technical` (fallo del sistema, no del agente). Si los argumentos no encajan con la firma, la herramienta no existe o `send_customer_email` se niega por las reglas, vuelve como `agent_error` (error del agente) y la herramienta no llega a actuar.
 
 ## Casos de prueba
 
