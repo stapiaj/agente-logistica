@@ -7,6 +7,9 @@ DEVELOPMENT TOOL, not part of the product: it ERASES the `envios` and
   app/mock_data.py, so the Sheet can always be rebuilt with known data.
 - `log_acciones`: the header is written only if the tab is empty. Existing
   rows are history and are kept, unless you pass --reset-log.
+- `eventos` (phase 4): created if missing. Same as the log: header only if
+  empty, rows kept unless you pass --reset-events (then repeated test
+  event_ids are accepted again).
 
 Values are written RAW (as they are): dates stay as text like 2026-10-23.
 With USER_ENTERED, Sheets would turn them into real dates and show them in
@@ -18,6 +21,7 @@ Sheets API has a per-minute quota.
 Run from the project root:
     python -m scripts.seed_sheet
     python -m scripts.seed_sheet --reset-log
+    python -m scripts.seed_sheet --reset-events
 """
 
 import argparse
@@ -26,6 +30,7 @@ import sys
 from app.integrations.sheets import (
     HEADERS,
     TAB_CUSTOMERS,
+    TAB_EVENTS,
     TAB_LOG,
     TAB_SHIPMENTS,
     SheetsError,
@@ -50,6 +55,24 @@ def to_rows(records: dict[str, dict], headers: list[str]) -> list[list]:
     return rows
 
 
+def keep_history(ws, tab: str, reset: bool, flag: str) -> None:
+    """History tabs (log, events): write the header only if empty or reset."""
+    # An empty tab comes back as [[]] (one empty row), not []: keep only
+    # rows that have at least one non-empty cell.
+    existing = [row for row in ws.get_all_values() if any(row)]
+    if reset or not existing:
+        ws.clear()
+        ws.update([HEADERS[tab]], "A1")
+        print(f"  {tab}: header written (tab is empty)")
+    elif existing[0] != HEADERS[tab]:
+        sys.exit(
+            f"[ERROR] {tab} has rows but an unexpected header: {existing[0]}\n"
+            f"  Fix it by hand or run with {flag} (erases the history)."
+        )
+    else:
+        print(f"  {tab}: kept ({len(existing) - 1} existing rows)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed the Google Sheet.")
     parser.add_argument(
@@ -57,10 +80,18 @@ def main() -> None:
         action="store_true",
         help="also erase log_acciones (history) and leave only its header",
     )
+    parser.add_argument(
+        "--reset-events",
+        action="store_true",
+        help="also erase eventos (received webhook notices) and leave only its header",
+    )
     args = parser.parse_args()
 
     try:
         spreadsheet = open_spreadsheet()
+        if TAB_EVENTS not in {ws.title for ws in spreadsheet.worksheets()}:
+            spreadsheet.add_worksheet(title=TAB_EVENTS, rows=1000, cols=len(HEADERS[TAB_EVENTS]))
+            print(f"  {TAB_EVENTS}: tab created")
         tabs = get_tabs(spreadsheet)
     except SheetsError as ex:
         sys.exit(f"[ERROR] {ex}")
@@ -72,21 +103,8 @@ def main() -> None:
         tabs[tab].update(rows, "A1")  # raw=True by default: values as they are
         print(f"  {tab}: header + {len(rows) - 1} rows written")
 
-    log = tabs[TAB_LOG]
-    # An empty tab comes back as [[]] (one empty row), not []: keep only
-    # rows that have at least one non-empty cell.
-    existing = [row for row in log.get_all_values() if any(row)]
-    if args.reset_log or not existing:
-        log.clear()
-        log.update([HEADERS[TAB_LOG]], "A1")
-        print(f"  {TAB_LOG}: header written (log is empty)")
-    elif existing[0] != HEADERS[TAB_LOG]:
-        sys.exit(
-            f"[ERROR] {TAB_LOG} has rows but an unexpected header: {existing[0]}\n"
-            "  Fix it by hand or run with --reset-log (erases the history)."
-        )
-    else:
-        print(f"  {TAB_LOG}: kept ({len(existing) - 1} existing rows)")
+    keep_history(tabs[TAB_LOG], TAB_LOG, args.reset_log, "--reset-log")
+    keep_history(tabs[TAB_EVENTS], TAB_EVENTS, args.reset_events, "--reset-events")
 
     print("Done.")
 

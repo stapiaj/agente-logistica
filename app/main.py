@@ -9,11 +9,12 @@ import threading
 import traceback
 from typing import Annotated
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, status
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent import describe_failed_calls, handle_shipment
 from app.config import load_webhook_secret
+from app.events import EventStoreError, register_event
 
 # Read once at startup. If it is missing, the server refuses to start.
 WEBHOOK_SECRET = load_webhook_secret()
@@ -102,13 +103,30 @@ def run_agent_job(shipment_id: str, event_id: str) -> None:
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(verify_secret)],
 )
-def shipment_delayed(event: ShipmentDelayedEvent, background_tasks: BackgroundTasks) -> dict:
+def shipment_delayed(
+    event: ShipmentDelayedEvent, background_tasks: BackgroundTasks, response: Response
+) -> dict:
     """Entry point for 'this shipment is delayed' notices.
 
     Only reached with the right secret (401 otherwise) and a valid body
-    (422 otherwise). Answers 202 at once: "received, I'll handle it". The
-    agent takes seconds; the sender must not wait (or retry on a timeout).
-    Idempotency (T5) comes next.
+    (422 otherwise). Then, by event_id:
+    - already received -> 200 "already_processed", the agent does NOT run;
+    - new -> recorded, 202 at once ("received, I'll handle it") and the
+      agent runs in the background (the sender must not wait);
+    - cannot check (Sheet down) -> 503 "retry later", the agent does NOT
+      run (fail closed: better late than a duplicate email).
     """
+    try:
+        is_new = register_event(event.event_id, event.shipment_id)
+    except EventStoreError as ex:
+        print(f"[webhook] cannot check event {event.event_id}: {ex}", flush=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Cannot check for duplicate events right now, retry later",
+        ) from ex
+    if not is_new:
+        print(f"[webhook] duplicate event {event.event_id} ({event.shipment_id}): ignored", flush=True)
+        response.status_code = status.HTTP_200_OK
+        return {"status": "already_processed", "shipment_id": event.shipment_id, "event_id": event.event_id}
     background_tasks.add_task(run_agent_job, event.shipment_id, event.event_id)
     return {"status": "accepted", "shipment_id": event.shipment_id, "event_id": event.event_id}
