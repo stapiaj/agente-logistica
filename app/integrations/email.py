@@ -39,9 +39,11 @@ def apply_test_mode(to: str, subject: str, body: str, test_recipient: str) -> tu
 def _explain(response: httpx.Response) -> str:
     """Turn an HTTP error from Resend into a message a person can act on."""
     code = response.status_code
-    if code in (401, 403):
-        hint = ("API key missing, wrong or without permission; without our own domain "
-                "Resend only sends to the account's email (check EMAIL_TEST_RECIPIENT)")
+    if code == 401:
+        hint = "wrong or missing RESEND_API_KEY"
+    elif code == 403:
+        hint = ("not allowed: the key has no sending permission, or the recipient is not "
+                "the account's email (without our own domain; check EMAIL_TEST_RECIPIENT)")
     elif code == 422:
         hint = "Resend rejected the email data (check EMAIL_FROM and the recipient)"
     elif code == 429:

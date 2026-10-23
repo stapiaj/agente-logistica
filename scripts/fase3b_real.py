@@ -72,7 +72,7 @@ def agent(cases: list[str]) -> None:
     load_resend_config()  # fail closed before spending any quota
     fase3a_sheets.agent(cases)
 
-    print(f"\n{'=' * 70}\nWHAT MUST HAVE REACHED YOU (check inbox and Telegram)\n{'=' * 70}")
+    print(f"\n{'=' * 70}\nWHAT MUST HAVE REACHED YOU (normal run, no breaks)\n{'=' * 70}")
     print(f"{'Shipment':<10} {'Emails':<7} {'Alerts':<7} What to look for")
     for shipment_id in cases:
         emails, alerts, note = EXPECTED_DELIVERIES.get(shipment_id, ("?", "?", "not a phase 3b case"))

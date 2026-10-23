@@ -109,7 +109,7 @@ def main() -> None:
         summary.append((shipment_id, yes_no(emailed), yes_no(escalated),
                         "yes" if guard.intervened else "no", verdict))
 
-    print(f"\n{'=' * 70}\nSUMMARY\n{'=' * 70}")
+    print(f"\n{'=' * 70}\nSUMMARY (CHECK = differs from a normal run; expected during a break)\n{'=' * 70}")
     print(f"{'Shipment':<10} {'Email':<6} {'Escal.':<7} {'Guardrail':<10} Result")
     for row in summary:
         print(f"{row[0]:<10} {row[1]:<6} {row[2]:<7} {row[3]:<10} {row[4]}")
