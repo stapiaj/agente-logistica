@@ -23,6 +23,9 @@
 - 2026-10-23 · [seguridad] Diagnosticar un secreto sin mostrarlo (longitud, partes, caracteres raros) → resolvió el 401 de Telegram sin exponer el token. Mantenerlo.
 - 2026-10-23 · [aprendizaje] Repetir la misma rotura con el modelo mostró dos caminos distintos (se saltó el aviso / avisó y falló) → con LLM, repetir la rotura si el camino importa, y cubrir cada camino con un check determinista sin LLM.
 - 2026-10-23 · [planificación] Un archivo de checks sin LLM que crece tarea a tarea (`fase3b_checks.py`) → cada tarea se valida en segundos y sin cuota antes de gastar llamadas reales. Mantenerlo desde la primera tarea de cada fase.
+- 2026-10-23 · [aprendizaje] Cuando Sergio se perdió con el código del webhook, explicarlo primero en funcional (historia de un aviso, analogías de timbre y ventanilla, tabla "qué pasa si falla") y solo después señalar en qué archivo vive cada paso → lo entendió y lo pudo contar. Para conceptos nuevos de arquitectura: funcional antes que código.
+- 2026-10-24 · [aprendizaje] Una rotura que "no rompía" (el 401 no salía) se investigó en vez de saltarla → apareció que VS Code carga el `.env` en cada terminal y `load_dotenv()` no lo pisa. Cuando una rotura no sale como se predijo, diagnosticar antes de seguir: suele esconder la mejor lección.
+- 2026-10-23 · [chats-IA] Probar el diseño en el entorno de la IA con las mismas versiones antes de dárselo a Sergio (orden secreto/cuerpo en FastAPI, checks de la T8) → apareció el matiz del JSON mal formado antes de que confundiera. Mantenerlo.
 
 ## A mejorar
 
@@ -44,3 +47,6 @@
 - 2026-10-22 · [git] En la 3a se hizo un commit después de fusionar el PR y se quedó fuera de `main` (hizo falta un segundo PR) → hacer todos los commits, incluidas las notas de cierre, antes de abrir el PR; si algo llega tarde, PR nuevo de la misma rama.
 - 2026-10-23 · [entorno] Variables nuevas de `.env` que faltaron al probar (`EMAIL_TEST_RECIPIENT`, `NOTIFY_MODE`) → al añadir variables, dar el bloque completo para `.env` y, en el mismo paso, el comando que comprueba que están (`Select-String -Pattern '_MODE'`), sin mostrar secretos.
 - 2026-10-23 · [chats-IA] Mensajes escritos por la IA que confundieron: la pista del 401 mencionaba el destinatario y las tablas de "lo esperado" no decían que eran para una ejecución normal → un mensaje de error por causa (no agrupar códigos) y toda tabla de "esperado" dice en qué escenario aplica.
+- 2026-10-23 · [aprendizaje] Ritmo demasiado rápido: varias tareas seguidas con mucho texto, términos dados por sabidos (cabecera, cuerpo, ejemplo en `/docs`) y varias pruebas en un mensaje → Sergio se perdió varias veces y pidió ir paso a paso. Una acción por mensaje cuando hay que ejecutar algo, y describir dónde se ve cada cosa en pantalla la primera vez.
+- 2026-10-23 · [chats-IA] Se repitió lo del 2026-10-22: en la propuesta de la T2 iba el comando de prueba y Sergio lanzó uvicorn antes de que existiera `main.py` → en la propuesta, ningún comando; los comandos solo cuando el cambio ya está hecho.
+- 2026-10-23 · [entorno] Al editar `.env` se truncó `EMAIL_TEST_RECIPIENT` sin darse cuenta (Resend 422) → tras tocar `.env`, comprobar la forma de los valores sensibles (sin mostrarlos) antes de una prueba real.

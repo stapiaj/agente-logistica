@@ -197,8 +197,13 @@ def run_agent(
     client: genai.Client | None = None,
     model: str | None = None,
     fallback_models: list[str] | None = None,
+    event_id: str = "",
 ) -> AgentRun:
-    """Handle one shipment event with the agent loop."""
+    """Handle one shipment event with the agent loop.
+
+    event_id (phase 4): the webhook notice that started this run, if any.
+    It only travels inside the tools to build the email idempotency key.
+    """
     if client is None or model is None:
         api_key, model = load_config()
         client = genai.Client(api_key=api_key)
@@ -209,7 +214,7 @@ def run_agent(
 
     # Tools for THIS shipment only: the id travels inside them, the model never
     # writes it (so it cannot change it).
-    tools = make_tools(shipment_id)
+    tools = make_tools(shipment_id, event_id)
 
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
@@ -431,13 +436,17 @@ def handle_shipment(
     shipment_id: str,
     client: genai.Client | None = None,
     model: str | None = None,
+    event_id: str = "",
 ) -> tuple[AgentRun, GuardrailReport]:
-    """Full flow for one shipment: clean id -> empty outbox -> agent -> guardrail."""
+    """Full flow for one shipment: clean id -> empty outbox -> agent -> guardrail.
+
+    event_id: from the webhook (phase 4); "" when run by hand or by scripts.
+    """
     # Normalise the FORMAT in code (our rule: ids are uppercase, no spaces).
     # Never "guess" a similar id: if it doesn't exist, it is an error.
     shipment_id = shipment_id.strip().upper()
     reset_outbox()
-    run = run_agent(shipment_id, client=client, model=model)
+    run = run_agent(shipment_id, client=client, model=model, event_id=event_id)
     report = apply_guardrail(shipment_id, run)
     return run, report
 

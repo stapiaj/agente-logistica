@@ -70,12 +70,19 @@ def lookup_shipment(shipment_id: str) -> dict:
     return {"ok": True, "shipment": shipment, "customer": customer}
 
 
-def deliver_email(to: str, subject: str, body: str) -> dict:
+def email_idempotency_key(event_id: str) -> str:
+    """One webhook notice -> at most one email. "" (no key) without a notice."""
+    return f"shipment-delayed/{event_id}" if event_id else ""
+
+
+def deliver_email(to: str, subject: str, body: str, idempotency_key: str = "") -> dict:
     """Send one email, simulated or real (EMAIL_MODE in .env).
 
     Bad input -> ok=False (never raises on it). If the real provider fails it
     RAISES: execute_tool turns that into a "technical" error. The email only
     goes to SENT_EMAILS once it was really accepted.
+    idempotency_key (phase 4): sent to Resend so the same key never sends
+    the email twice; "" when there is no webhook notice (scripts).
     """
     if not to or "@" not in to:
         return {"ok": False, "error": f"invalid recipient: {to!r}"}
@@ -85,10 +92,12 @@ def deliver_email(to: str, subject: str, body: str) -> dict:
         # Imported only when needed: simulated mode works without Resend.
         from app.integrations import email as email_provider
 
-        message_id = email_provider.send_email(to, subject, body)
+        message_id = email_provider.send_email(to, subject, body, idempotency_key)
         status = f"sent via Resend (id {message_id})"
     else:
         status = "sent (simulated)"
+    if idempotency_key:
+        status += f", idempotency key {idempotency_key}"
     SENT_EMAILS.append({"to": to, "subject": subject, "body": body})
     print(f"\n[EMAIL -> {to}] {status}\nSubject: {subject}\n{body}\n")
     return {"ok": True, "status": status}
@@ -214,13 +223,16 @@ def _append_log(shipment_id: str, action: str, reason: str, details: str) -> tup
 # ---------------------------------------------------------------------------
 
 
-def make_tools(shipment_id: str) -> dict[str, Callable[..., dict]]:
+def make_tools(shipment_id: str, event_id: str = "") -> dict[str, Callable[..., dict]]:
     """Build the 4 tools for one run, with shipment_id already inside.
 
     Each inner function "remembers" the shipment_id it was created with
     (a closure). A new run creates new tools, so two shipments handled at
     the same time (phase 4, FastAPI) can never mix their ids.
+    event_id (phase 4) travels the same way, to build the email
+    idempotency key: the model never sees it or writes it.
     """
+    email_key = email_idempotency_key(event_id)
 
     def get_shipment() -> dict:
         """Look up the shipment of this event and its customer. Read only.
@@ -271,7 +283,7 @@ def make_tools(shipment_id: str) -> dict[str, Callable[..., dict]]:
                     "error": "refused: you already escalated by judgment (rule 6). Nothing "
                              "was sent: the email goes as email_draft for a human to review."}
         # 4. The recipient comes from the data, never from the model.
-        return deliver_email(facts["customer"]["contact_email"], subject, body)
+        return deliver_email(facts["customer"]["contact_email"], subject, body, email_key)
 
     def notify_human(message: str, email_draft: str = "") -> dict:
         """Alert the human supervisor so they take over the case.

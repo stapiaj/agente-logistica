@@ -37,6 +37,33 @@
 | reason | texto (por qué el agente decidió eso) |
 | details | texto |
 
+### `eventos` (fase 4)
+
+Avisos del webhook ya recibidos (idempotencia). La escribe solo la API; `scripts/seed_sheet.py` la crea si falta y la conserva salvo `--reset-events`. Va aparte de `log_acciones`: avisos recibidos ≠ lo que hizo el agente.
+
+| Columna | Tipo |
+|---|---|
+| received_at | fecha y hora ISO (UTC) |
+| event_id | texto (`evt-<shipment_id>-<uuid>` desde la hoja) |
+| shipment_id | texto |
+
+## Contrato del webhook (fase 4)
+
+`POST /webhook/shipment-delayed` (y `GET /health` → `200 {"status": "ok"}`)
+
+- **Cabecera:** `X-Webhook-Secret: <WEBHOOK_SECRET>`
+- **Cuerpo (JSON):** `{"shipment_id": "ENV-1001", "event_id": "evt-ENV-1001-…"}`. Ambos texto obligatorio, sin espacios sobrantes, no vacío; `event_id` como máximo 200 caracteres (de él sale la clave de Resend, ≤ 256). Campos extra: se ignoran.
+
+| Respuesta | Cuándo | ¿Se ejecuta el agente? | El script de la hoja |
+|---|---|---|---|
+| `202 {"status": "accepted", …}` | Aviso nuevo (apuntado en `eventos`) | Sí, en segundo plano | Fin |
+| `200 {"status": "already_processed", …}` | `event_id` ya recibido | No | Fin |
+| `401` | Falta el secreto o no coincide | No | No reintenta |
+| `422` | Cuerpo que no encaja (o JSON mal formado) | No | No reintenta |
+| `503` | No se puede comprobar si está repetido (hoja caída) | No (falla cerrado) | Reintenta con el mismo `event_id` |
+
+El servidor no comprueba si el envío existe: eso lo hace el agente (ENV-9999 → `202` y log `error`).
+
 ## Reglas de negocio del agente
 
 1. Solo actúa sobre envíos con `status = retrasado`. Si no, registra `no_action`.
@@ -69,12 +96,12 @@ Compara lo que hizo el agente (y lo que intentó) con lo que dice `rules.py`:
 
 ## Herramientas del agente
 
-Cada ejecución trata **un solo envío**. El código crea las herramientas con el `shipment_id` ya dentro (`make_tools(shipment_id)` en `app/tools.py`): **el modelo nunca escribe el id**, así que no puede cambiarlo. La entrada se normaliza antes (`strip().upper()`).
+Cada ejecución trata **un solo envío**. El código crea las herramientas con el `shipment_id` ya dentro (`make_tools(shipment_id, event_id)` en `app/tools.py`): **el modelo nunca escribe el id**, así que no puede cambiarlo. La entrada se normaliza antes (`strip().upper()`). El `event_id` del aviso (fase 4) viaja igual, solo para la clave de idempotencia del email; sin aviso (scripts) va vacío y no hay clave.
 
 | Herramienta | Entrada | Salida | Efecto |
 |---|---|---|---|
 | `get_shipment()` | ninguna (el id lo pone el código) | datos del envío + datos del cliente, o error si no existe | Solo lectura |
-| `send_customer_email(subject, body)` | asunto y cuerpo (el destinatario, `contact_email`, lo pone el código) | ok / error | Antes de enviar consulta `rules.py` y se niega si no toca email (o si ya se escaló por criterio); si toca, envía (Resend o simulado, según `EMAIL_MODE`) |
+| `send_customer_email(subject, body)` | asunto y cuerpo (el destinatario, `contact_email`, lo pone el código) | ok / error | Antes de enviar consulta `rules.py` y se niega si no toca email (o si ya se escaló por criterio); si toca, envía (Resend o simulado, según `EMAIL_MODE`), con `Idempotency-Key: shipment-delayed/<event_id>` si viene de un aviso |
 | `notify_human(message, email_draft="")` | texto del aviso; borrador del email no enviado (obligatorio en todo escalado sin email) | ok / error | Mensaje al responsable (Telegram o simulado, según `NOTIFY_MODE`); el código añade el `shipment_id` y los motivos según `rules.py` |
 | `log_action(action, reason, details)` | campos del log (el id lo pone el código) | ok / error | Añade una fila a `log_acciones` |
 

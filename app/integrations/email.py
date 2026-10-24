@@ -10,6 +10,10 @@ Two safety nets, because a real email can't be undone:
 - No automatic retries: after a timeout we don't know if the email left.
   Retrying could email the customer twice, so we raise and a human checks.
   Only retry what is safe to repeat (idempotent).
+- Idempotency key (phase 4): with the Idempotency-Key header, Resend keeps
+  the key for 24 h. Same key + same email -> not sent again (it returns the
+  original id). Same key + different email -> 409, nothing sent. We derive
+  the key from the webhook event_id: one notice, at most one email.
 
 Errors: any failure raises EmailError with a readable message. The agent
 loop turns it into a "technical" error (not the agent's fault) and the
@@ -44,6 +48,9 @@ def _explain(response: httpx.Response) -> str:
     elif code == 403:
         hint = ("not allowed: the key has no sending permission, or the recipient is not "
                 "the account's email (without our own domain; check EMAIL_TEST_RECIPIENT)")
+    elif code == 409:
+        hint = ("idempotency key already used: this notice already sent an email with "
+                "different content (or the first one is still in progress); nothing was sent")
     elif code == 422:
         hint = "Resend rejected the email data (check EMAIL_FROM and the recipient)"
     elif code == 429:
@@ -55,14 +62,20 @@ def _explain(response: httpx.Response) -> str:
     return f"Resend HTTP {code}: {hint}. Response: {response.text[:300]}"
 
 
-def send_email(to: str, subject: str, body: str) -> str:
-    """Send one email. Returns Resend's message id. Raises EmailError."""
+def send_email(to: str, subject: str, body: str, idempotency_key: str = "") -> str:
+    """Send one email. Returns Resend's message id. Raises EmailError.
+
+    idempotency_key: "" = no header (manual tests and scripts).
+    """
     api_key, sender, test_recipient = load_resend_config()
     to, subject, body = apply_test_mode(to, subject, body, test_recipient)
+    headers = {"Authorization": f"Bearer {api_key}"}
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
     try:
         response = httpx.post(
             RESEND_URL,
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers=headers,
             json={"from": sender, "to": [to], "subject": subject, "text": body},
             timeout=TIMEOUT_SECONDS,
         )
@@ -78,6 +91,11 @@ def send_email(to: str, subject: str, body: str) -> str:
 
 if __name__ == "__main__":
     # Manual test, no LLM: python -m app.integrations.email
+    # With a key (phase 4): python -m app.integrations.email <key>
+    #   run it twice with the same key -> same id, only ONE email arrives.
+    import sys
+
+    key = sys.argv[1] if len(sys.argv) > 1 else ""
     message_id = send_email("cliente.ficticio@example.com", "Prueba de Resend",
-                            "Hola,\n\nEste es un email de prueba del Agente Logística.\n")
-    print(f"Sent. Resend id: {message_id}")
+                            "Hola,\n\nEste es un email de prueba del Agente Logística.\n", key)
+    print(f"Sent. Resend id: {message_id}" + (f" (idempotency key {key})" if key else ""))

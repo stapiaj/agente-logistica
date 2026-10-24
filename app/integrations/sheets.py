@@ -31,6 +31,7 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 TAB_SHIPMENTS = "envios"
 TAB_CUSTOMERS = "clientes"
 TAB_LOG = "log_acciones"
+TAB_EVENTS = "eventos"  # phase 4: webhook notices already received
 
 HEADERS: dict[str, list[str]] = {
     TAB_SHIPMENTS: [
@@ -58,6 +59,11 @@ HEADERS: dict[str, list[str]] = {
         "action",
         "reason",
         "details",
+    ],
+    TAB_EVENTS: [
+        "received_at",
+        "event_id",
+        "shipment_id",
     ],
 }
 
@@ -90,7 +96,7 @@ def open_spreadsheet() -> gspread.Spreadsheet:
 
 
 def get_tabs(spreadsheet: gspread.Spreadsheet) -> dict[str, gspread.Worksheet]:
-    """Return the 3 tabs by name. One API call for all of them."""
+    """Return the tabs of HEADERS by name. One API call for all of them."""
     tabs = {ws.title: ws for ws in spreadsheet.worksheets()}
     missing = [name for name in HEADERS if name not in tabs]
     if missing:
@@ -200,3 +206,25 @@ def append_log(row: dict) -> None:
         _tabs()[TAB_LOG].append_row(values)
     except APIError as ex:
         raise _api_error(f"writing to {TAB_LOG}", ex) from ex
+
+
+# ---------------------------------------------------------------------------
+# Events (phase 4, T5): which webhook notices were already received, so a
+# repeated notice never runs the agent twice. Kept in the Sheet because it
+# survives restarts (Render's free plan sleeps and wipes memory and disk).
+# ---------------------------------------------------------------------------
+
+
+def find_event(event_id: str) -> bool:
+    """True if this event_id is already in `eventos` (1 API call)."""
+    wanted = event_id.strip()
+    return any(record["event_id"] == wanted for record in _read_records(TAB_EVENTS))
+
+
+def append_event(row: dict) -> None:
+    """Add one row at the end of `eventos` (1 API call), written RAW."""
+    values = [str(row.get(col, "")) for col in HEADERS[TAB_EVENTS]]
+    try:
+        _tabs()[TAB_EVENTS].append_row(values)
+    except APIError as ex:
+        raise _api_error(f"writing to {TAB_EVENTS}", ex) from ex

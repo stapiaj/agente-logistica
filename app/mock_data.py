@@ -150,3 +150,18 @@ def find_customer(customer_id: str) -> dict | None:
 
 def append_log(row: dict) -> None:
     """Nothing to persist: in memory, the outbox (tools.ACTION_LOG) is the log."""
+
+
+# Events (phase 4, T5): same 2 functions as app/integrations/sheets.py.
+# In memory they last until the process stops (enough for local tests).
+EVENTS: list[dict] = []
+
+
+def find_event(event_id: str) -> bool:
+    """True if this event_id was already received."""
+    return any(row["event_id"] == event_id.strip() for row in EVENTS)
+
+
+def append_event(row: dict) -> None:
+    """Remember one received event."""
+    EVENTS.append(dict(row))
