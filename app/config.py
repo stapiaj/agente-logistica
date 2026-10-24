@@ -126,6 +126,18 @@ def load_telegram_config(need_chat_id: bool = True) -> tuple[str, str]:
     return token, chat_id
 
 
+def load_alert_email() -> str:
+    """Supervisor's email for the BACKUP alert channel (phase 5).
+
+    If Telegram can't deliver an alert, it goes by email to this address
+    (with Resend, through send_email: test mode and fail closed still apply).
+    Empty -> no backup channel: a failed alert behaves as before phase 5
+    (the guardrail retries once and, as a last resort, an "error" log row).
+    """
+    load_dotenv()
+    return os.getenv("ALERT_EMAIL_TO", "").strip()
+
+
 MIN_WEBHOOK_SECRET_LENGTH = 32
 
 

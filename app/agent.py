@@ -19,6 +19,7 @@ from app.config import load_config, load_fallback_models
 from app.rules import Expected, evaluate
 from app.tools import (
     ACTION_LOG,
+    GUARDRAIL_ACTION,
     HUMAN_NOTIFICATIONS,
     SENT_EMAILS,
     deliver_alert,
@@ -295,7 +296,10 @@ def apply_guardrail(shipment_id: str, run: AgentRun | None = None) -> GuardrailR
     # 2. What really happened: successful actions only (a rejected email didn't happen).
     did_email = bool(SENT_EMAILS)
     did_escalate = bool(HUMAN_NOTIFICATIONS)
-    did_log = bool(ACTION_LOG)
+    # Only the agent's own actions count as "logged": an informative
+    # "guardrail" row (e.g. the alert went by email, phase 5) written during
+    # the run must not hide that the agent logged nothing.
+    did_log = any(row["action"] != GUARDRAIL_ACTION for row in ACTION_LOG)
     # Escalations by judgment (rule 6): the agent saw something serious the
     # rules don't cover. rules.py can't predict them, so they are accepted.
     judgment_alerts = [n for n in HUMAN_NOTIFICATIONS if is_judgment(n["message"])]
