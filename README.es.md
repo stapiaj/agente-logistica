@@ -16,6 +16,14 @@ https://github.com/user-attachments/assets/d5e3231b-91da-4647-9905-36786271c4a4
 
 Un retraso recorre todos los módulos del sistema, uno a uno. El vídeo está hecho en HTML y exportado a MP4 ([descargar](assets/viaje.mp4)); el código fuente está en [`video/`](video/). Música: Sascha Ende ([ende.app](https://ende.app/en)), CC BY 4.0.
 
+### En producción, paso a paso
+
+https://github.com/user-attachments/assets/14e24632-a751-4385-a56a-2e71c90ca505
+
+Capturas de una ejecución real en producción (25 oct 2026): un retraso normal (ENV-1002: email al cliente y escalado por regla) y el caso del camión robado (ENV-1006: escalado por criterio, sin enviar email). Los datos personales están difuminados. Misma música que el vídeo anterior.
+
+### Momentos clave
+
 | 1. Alguien marca un envío como `retrasado` en la hoja logística | 2. El cliente recibe un email |
 |---|---|
 | ![Hoja de envíos](assets/sheet-envios.png) | ![Email al cliente](assets/email.png) |

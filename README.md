@@ -16,6 +16,14 @@ https://github.com/user-attachments/assets/d5e3231b-91da-4647-9905-36786271c4a4
 
 An animated walk-through of one delayed shipment across every module (on-screen text in Spanish). It is built in HTML and exported to MP4 ([download](assets/viaje.mp4)); the source is in [`video/`](video/). Music: Sascha Ende ([ende.app](https://ende.app/en)), CC BY 4.0.
 
+### In production, step by step
+
+https://github.com/user-attachments/assets/14e24632-a751-4385-a56a-2e71c90ca505
+
+Screenshots of a real run in production (25 Oct 2026): a normal delay (ENV-1002: email to the customer and escalation by rule) and the stolen-truck case (ENV-1006: escalation by judgment, no email sent). Personal details are blurred. Same music credit as above.
+
+### Key moments
+
 | 1. Someone marks a shipment as `retrasado` (delayed) in the logistics sheet | 2. The customer gets an email |
 |---|---|
 | ![Shipments sheet](assets/sheet-envios.png) | ![Email to the customer](assets/email.png) |
