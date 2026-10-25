@@ -1,7 +1,10 @@
-"""HTTP server for the logistics agent (phase 4).
+"""HTTP server for the logistics agent (phase 4, deployed in phase 5).
 
 Run locally with:  uvicorn app.main:app --reload
 Interactive docs:  http://127.0.0.1:8000/docs
+In Render:         uvicorn app.main:app --host 0.0.0.0 --port $PORT
+  0.0.0.0 = listen to calls from outside this machine (127.0.0.1 only
+  accepts calls from itself); $PORT = the port Render gives the service.
 """
 
 import secrets
@@ -13,16 +16,19 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Re
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent import describe_failed_calls, handle_shipment
-from app.config import load_webhook_secret
+from app.config import load_webhook_secret, startup_report
 from app.events import EventStoreError, register_event
 
 # Read once at startup. If it is missing, the server refuses to start.
 WEBHOOK_SECRET = load_webhook_secret()
+# Check the rest of the configuration too (stops if something essential is
+# missing) and say in the logs which modes are on, without secrets.
+print(startup_report(), flush=True)
 
 app = FastAPI(
     title="Agente Logistica",
     description="Receives 'shipment delayed' webhooks and runs the agent.",
-    version="0.4.0",
+    version="0.5.0",
 )
 
 

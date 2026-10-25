@@ -47,6 +47,10 @@ def run_checks() -> None:
     os.environ["EMAIL_MODE"] = "simulated"   # never a real email
     os.environ["NOTIFY_MODE"] = "simulated"  # never a real Telegram message
     os.environ["WEBHOOK_SECRET"] = TEST_SECRET  # not your real one
+    # Phase 5: the server checks its config at startup. The agent is faked
+    # here, so Gemini is never called: placeholders only if none are set.
+    os.environ.setdefault("GEMINI_API_KEY", "fake-key-for-checks")
+    os.environ.setdefault("GEMINI_MODEL", "fake-model-for-checks")
 
     # Starlette's TestClient warns when it uses httpx (it prefers httpx2).
     warnings.filterwarnings("ignore", message=".*httpx.*")

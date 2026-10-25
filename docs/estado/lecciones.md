@@ -27,6 +27,11 @@
 - 2026-10-24 · [aprendizaje] Una rotura que "no rompía" (el 401 no salía) se investigó en vez de saltarla → apareció que VS Code carga el `.env` en cada terminal y `load_dotenv()` no lo pisa. Cuando una rotura no sale como se predijo, diagnosticar antes de seguir: suele esconder la mejor lección.
 - 2026-10-23 · [chats-IA] Probar el diseño en el entorno de la IA con las mismas versiones antes de dárselo a Sergio (orden secreto/cuerpo en FastAPI, checks de la T8) → apareció el matiz del JSON mal formado antes de que confundiera. Mantenerlo.
 
+- 2026-10-25 · [aprendizaje] Dejar fallar a propósito el primer despliegue (sin variables) → Sergio aprendió a leer los logs de Render con un error conocido antes de necesitarlo de verdad. Para cada plataforma nueva, provocar primero un fallo controlado.
+- 2026-10-25 · [chats-IA] Comprobar en la documentación de la plataforma lo que cambia con el tiempo (Python por defecto en Render 3.14, ruta de los archivos secretos, servicios gratuitos) antes de proponer → evitó un cambio de versión silencioso. Mantenerlo para cualquier servicio externo.
+- 2026-10-25 · [planificación] Desplegar la rama de la fase y cambiar a `main` al fusionar → se pudo probar en producción sin romper "un PR por fase". Mantenerlo.
+- 2026-10-25 · [aprendizaje] Ante un resultado inesperado en producción (el email del pegado), pedir pruebas (logs, ejecuciones) antes de explicar → el diagnóstico salió de los datos y apareció un límite real del diseño.
+
 ## A mejorar
 
 - 2026-10-19 · [chats-IA] El conocimiento del proyecto de Claude estaba vacío y ningún chat lo detectó (funcionaba solo porque leían la carpeta) → al configurar un proyecto, comprobar explícitamente que el conocimiento está cargado.
@@ -50,3 +55,6 @@
 - 2026-10-23 · [aprendizaje] Ritmo demasiado rápido: varias tareas seguidas con mucho texto, términos dados por sabidos (cabecera, cuerpo, ejemplo en `/docs`) y varias pruebas en un mensaje → Sergio se perdió varias veces y pidió ir paso a paso. Una acción por mensaje cuando hay que ejecutar algo, y describir dónde se ve cada cosa en pantalla la primera vez.
 - 2026-10-23 · [chats-IA] Se repitió lo del 2026-10-22: en la propuesta de la T2 iba el comando de prueba y Sergio lanzó uvicorn antes de que existiera `main.py` → en la propuesta, ningún comando; los comandos solo cuando el cambio ya está hecho.
 - 2026-10-23 · [entorno] Al editar `.env` se truncó `EMAIL_TEST_RECIPIENT` sin darse cuenta (Resend 422) → tras tocar `.env`, comprobar la forma de los valores sensibles (sin mostrarlos) antes de una prueba real.
+- 2026-10-25 · [chats-IA] "Una acción por mensaje" se volvió lento en formularios largos (Render) y Sergio pidió ir más rápido → agrupar por pantalla (todos los campos de una pantalla en una tabla) y pegar la configuración en bloque, cambiando solo lo distinto. "Paso a paso" significa una pantalla o un concepto, no un campo.
+- 2026-10-24 · [chats-IA] Claude dio una falsa alarma (diff de archivo entero) porque su terminal no traduce CRLF/LF como el Git de Windows de Sergio → antes de alarmar por un diff, compararlo con `--ignore-cr-at-eol` o `core.autocrlf=true`.
+- 2026-10-25 · [planificación] La rotura 3 (canal de avisos en Render) se quedó sin ejecutar por tiempo y cuota → planificar las roturas que gastan LLM al principio del cierre, o probarlas antes sin LLM, y reservar cuota para el cierre.

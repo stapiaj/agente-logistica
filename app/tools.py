@@ -23,7 +23,7 @@ the guardrail reads them afterwards.
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from app.config import load_email_mode, load_notify_mode
+from app.config import load_alert_email, load_email_mode, load_notify_mode
 from app.data_source import get_data_source
 from app.rules import evaluate
 
@@ -34,6 +34,12 @@ VALID_ACTIONS = {"email_sent", "escalated", "no_action", "error"}
 GUARDRAIL_ACTION = "guardrail"
 # A human alert starting with this is an escalation by judgment (rule 6).
 JUDGMENT_PREFIX = "JUDGMENT:"
+
+
+
+class AlertError(Exception):
+    """The human alert could not be delivered by ANY channel."""
+
 
 # Outbox: everything the agent did during one run.
 SENT_EMAILS: list[dict] = []
@@ -109,17 +115,24 @@ def deliver_alert(shipment_id: str, message: str, email_draft: str = "",
 
     email_draft: an email the agent did NOT send, for the human to review
     (human-in-the-loop on judgment escalations).
+    Two channels (phase 5): Telegram first; if it fails, the same alert goes
+    by email to the supervisor (ALERT_EMAIL_TO). Every alert passes through
+    here (agent and guardrail), so one change covers both. Only if BOTH
+    fail does this raise -> "technical" in the loop; the guardrail retries
+    once and, as a last resort, leaves an "error" row in the log.
     """
     if not message or not message.strip():
         return {"ok": False, "error": "message is required"}
     text = format_alert(shipment_id, message, email_draft, rule_lines(shipment_id), author)
     if load_notify_mode() == "telegram":
-        # Imported only when needed. If Telegram fails this RAISES ->
-        # "technical" in the loop; the guardrail protects its own call.
+        # Imported only when needed.
         from app.integrations import telegram
 
-        parts = telegram.send_message(text)
-        status = f"sent via Telegram ({parts} message(s))"
+        try:
+            parts = telegram.send_message(text)
+            status = f"sent via Telegram ({parts} message(s))"
+        except Exception as error:  # noqa: BLE001 - any failure -> backup channel
+            status = _alert_by_email(shipment_id, text, error)
     else:
         status = "notified (simulated)"
     # Only counts as delivered once the channel accepted it.
@@ -128,6 +141,40 @@ def deliver_alert(shipment_id: str, message: str, email_draft: str = "",
     )
     print(f"\n[HUMAN ALERT] {status}\n{text}\n")
     return {"ok": True, "status": status}
+
+
+def _alert_by_email(shipment_id: str, text: str, telegram_error: Exception) -> str:
+    """Backup channel: the same alert, by email to the supervisor.
+
+    Not in SENT_EMAILS: that list is "emails to the CUSTOMER" and the
+    guardrail reads it. No idempotency key: a duplicate alert is a nuisance,
+    not a harm (same policy as Telegram). Telegram errors already hide the
+    token, so the reason is safe to put in the email and the log.
+    """
+    reason = f"{type(telegram_error).__name__}: {telegram_error}"
+    to = load_alert_email()
+    if not to:  # no backup configured: behave as before phase 5
+        raise telegram_error
+    subject = f"[ALERT] Shipment {shipment_id} (sent by email: Telegram failed)"
+    body = (f"Telegram could not deliver this alert, so it comes by email.\n"
+            f"Telegram error: {reason}\n\n{text}\n")
+    try:
+        if load_email_mode() == "resend":
+            from app.integrations import email as email_provider
+
+            message_id = email_provider.send_email(to, subject, body)
+            sent = f"via Resend (id {message_id})"
+        else:
+            sent = "(simulated)"
+            print(f"\n[ALERT EMAIL -> {to}] (simulated)\nSubject: {subject}\n{body}")
+    except Exception as email_error:  # noqa: BLE001
+        raise AlertError(f"both alert channels failed. Telegram: {reason} | "
+                         f"Email: {type(email_error).__name__}: {email_error}") from None
+    # Informative row (like "technical failure" in 2b): measures how often
+    # Telegram fails. Action "guardrail": an observation, not the agent's fault.
+    record_guardrail(shipment_id, "alert delivered by email: Telegram failed (not an agent error)",
+                     reason)
+    return f"sent by EMAIL to the supervisor {sent} because Telegram failed: {reason}"
 
 
 def rule_lines(shipment_id: str) -> list[str]:
