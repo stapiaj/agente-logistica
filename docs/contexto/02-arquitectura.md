@@ -83,7 +83,7 @@ Agente-logistica/
 ├── scripts/               # Herramientas de desarrollo: pruebas manuales por fase y seed_sheet.py (no se ejecutan en producción)
 ├── docs/
 │   ├── contexto/          # Diseño fijo (contexto del proyecto de Claude)
-│   └── estado/            # Estado vivo: progreso.md y bitacora.md
+│   └── estado/            # Estado vivo: lecciones.md (progreso, bitácora y próximo encargo: solo en local)
 ├── .env.example
 ├── .gitignore
 ├── .python-version        # Versión de Python que usa Render (la misma que en local)

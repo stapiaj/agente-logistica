@@ -6,6 +6,8 @@ Estás ayudando a Sergio a construir **Agente Logística**: un "AI worker" que g
 
 El proyecto vive en la carpeta `Agente-logistica` del ordenador de Sergio. Varios chats trabajan sobre ella, uno detrás de otro, y **ninguno recuerda lo que hicieron los anteriores**: la memoria compartida son los archivos de `docs/`. Por eso el protocolo de abajo es **obligatorio**.
 
+Las notas de trabajo (`docs/estado/progreso.md`, `bitacora.md` y `proximo-encargo.md`) viven solo en la carpeta local: están en `.gitignore` y no se publican. El protocolo es el mismo: se leen y se actualizan ahí, pero no entran en los commits. `docs/estado/lecciones.md` sí se versiona.
+
 ---
 
 ## Cómo se reparte el trabajo

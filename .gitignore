@@ -13,3 +13,8 @@ __pycache__/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Notas de trabajo (solo en local, no se publican)
+docs/estado/progreso.md
+docs/estado/bitacora.md
+docs/estado/proximo-encargo.md

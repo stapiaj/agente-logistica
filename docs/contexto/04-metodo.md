@@ -20,7 +20,7 @@ Principio: **la IA escribe el código; Sergio dirige, lee, entiende y depura.** 
 
 ## Coordinación entre chats
 
-Cada chat sigue el **protocolo obligatorio** de `docs/contexto/00-instrucciones-proyecto.md`: leer el estado al empezar, anotar la tarea en "Trabajo en curso" antes de cada cambio, registrar las decisiones después y dejar una entrada en `docs/estado/bitacora.md` antes de cerrar.
+Cada chat sigue el **protocolo obligatorio** de `docs/contexto/00-instrucciones-proyecto.md`: leer el estado al empezar, anotar la tarea en "Trabajo en curso" antes de cada cambio, registrar las decisiones después y dejar una entrada en `docs/estado/bitacora.md` antes de cerrar. Esas notas de trabajo (`progreso.md`, `bitacora.md` y `proximo-encargo.md`) se llevan en local y no se publican; en el repo solo está `lecciones.md`.
 
 ## Prueba final de aprendizaje
 
