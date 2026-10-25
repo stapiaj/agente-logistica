@@ -138,6 +138,43 @@ def load_alert_email() -> str:
     return os.getenv("ALERT_EMAIL_TO", "").strip()
 
 
+def startup_report() -> str:
+    """Check the configuration the server needs and describe it, WITHOUT secrets.
+
+    Called once when the server starts (phase 5). In Render there is no
+    terminal to look at: if something essential is missing, the server
+    stops here with a clear message in the logs (the deploy fails and
+    Render keeps the previous version running), instead of failing later
+    with the first notice from the Sheet. Each load_* stops the program
+    (sys.exit) if its settings are missing or invalid.
+    Returns one line for the logs: modes and "set"/"found", never values.
+    """
+    load_config()  # Gemini key and model
+    source = load_data_source()
+    parts = [f"DATA_SOURCE={source}"]
+    if source == "sheets":
+        _, key_file = load_sheets_config()
+        if not os.path.isfile(key_file):
+            sys.exit(f"Service account key file not found: {key_file!r}. "
+                     "In Render: add it as a Secret File and point "
+                     "GOOGLE_SERVICE_ACCOUNT_FILE to /etc/secrets/<name>")
+        parts.append("key_file=found")
+    email_mode = load_email_mode()
+    if email_mode == "resend":
+        load_resend_config()
+    parts.append(f"EMAIL_MODE={email_mode}")
+    notify_mode = load_notify_mode()
+    if notify_mode == "telegram":
+        load_telegram_config()
+    parts.append(f"NOTIFY_MODE={notify_mode}")
+    alert_email = load_alert_email()
+    parts.append(f"ALERT_EMAIL_TO={'set' if alert_email else 'EMPTY'}")
+    line = "[startup] " + " ".join(parts)
+    if notify_mode == "telegram" and not alert_email:
+        line += "\n[startup] WARNING: no backup alert channel (ALERT_EMAIL_TO is empty)"
+    return line
+
+
 MIN_WEBHOOK_SECRET_LENGTH = 32
 
 
