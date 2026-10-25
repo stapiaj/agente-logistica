@@ -31,6 +31,8 @@
 - 2026-10-25 · [chats-IA] Comprobar en la documentación de la plataforma lo que cambia con el tiempo (Python por defecto en Render 3.14, ruta de los archivos secretos, servicios gratuitos) antes de proponer → evitó un cambio de versión silencioso. Mantenerlo para cualquier servicio externo.
 - 2026-10-25 · [planificación] Desplegar la rama de la fase y cambiar a `main` al fusionar → se pudo probar en producción sin romper "un PR por fase". Mantenerlo.
 - 2026-10-25 · [aprendizaje] Ante un resultado inesperado en producción (el email del pegado), pedir pruebas (logs, ejecuciones) antes de explicar → el diagnóstico salió de los datos y apareció un límite real del diseño.
+- 2026-10-25 · [chats-IA] Antes de pedir a Sergio que pegue el script de Apps Script, Claude lo probó con un "Google falso" en Node (hoja, propiedades y `UrlFetchApp` simulados, 8 casos) → el código llegó a producción sin fallos a la primera. Mantenerlo para todo código que solo corre en un servicio externo.
+- 2026-10-25 · [aprendizaje] Sergio pidió explicar la rotura en vez de ejecutarla cuando el resultado se deduce del código y de pruebas ya hechas → romper a propósito sirve cuando hay algo que descubrir; si no, explicarla con predicción y dejar la prueba en vivo como opcional.
 
 ## A mejorar
 
@@ -58,3 +60,4 @@
 - 2026-10-25 · [chats-IA] "Una acción por mensaje" se volvió lento en formularios largos (Render) y Sergio pidió ir más rápido → agrupar por pantalla (todos los campos de una pantalla en una tabla) y pegar la configuración en bloque, cambiando solo lo distinto. "Paso a paso" significa una pantalla o un concepto, no un campo.
 - 2026-10-24 · [chats-IA] Claude dio una falsa alarma (diff de archivo entero) porque su terminal no traduce CRLF/LF como el Git de Windows de Sergio → antes de alarmar por un diff, compararlo con `--ignore-cr-at-eol` o `core.autocrlf=true`.
 - 2026-10-25 · [planificación] La rotura 3 (canal de avisos en Render) se quedó sin ejecutar por tiempo y cuota → planificar las roturas que gastan LLM al principio del cierre, o probarlas antes sin LLM, y reservar cuota para el cierre.
+- 2026-10-25 · [producto] El enfoque público ("proyecto de aprendizaje por iniciativa propia") se decidió en el chat principal y Sergio lo cambió al ver el texto ("proyecto personal") → decidir el posicionamiento enseñando la frase real que se va a publicar, no una etiqueta abstracta.
