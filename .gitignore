@@ -18,3 +18,8 @@ Thumbs.db
 docs/estado/progreso.md
 docs/estado/bitacora.md
 docs/estado/proximo-encargo.md
+
+# Vídeo: archivos temporales de render.py
+video/_frames/
+video/still_*.jpg
+video/*.mp4
