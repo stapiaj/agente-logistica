@@ -137,13 +137,37 @@ Cada fase se hace en su propia rama y termina con algo que funciona, una explica
 
 ## Fase 6 · Presentación
 
-**Objetivo:** dejar el proyecto listo para enseñarlo.
+**Objetivo:** dejar el proyecto listo para enseñarlo: que funcione sin sorpresas, que cualquiera entienda qué hace y por qué en dos minutos, y que el repo pueda ser público sin secretos ni notas de trabajo.
 
-- `README.md` como caso de cliente: problema, proceso actual, solución, diagrama, impacto, limitaciones y roadmap (ver `docs/contexto/01-contexto.md`).
-- Vídeo de demo de 1-2 minutos.
-- Repo público (decidido): antes de cambiar la visibilidad, revisar que no haya secretos en el historial (`git log -p`, buscar claves) y que los commits usen el email noreply.
+**Cambio de plan (2026-10-25):** se divide en tres partes. Es la fase más variada, y publicar el repo (reescribir el historial) es una operación delicada que merece su propia sesión.
+
+### Fase 6a · Arreglo final, limpieza de textos y README
+
+- Arreglar el pegado en la hoja: el script guarda el último estado avisado de cada envío y compara con eso, no con `e.oldValue` (que Google no da al pegar). Un segundo retraso real sigue avisando.
+- Limpiar los textos que serán públicos (`docs/contexto/`, `docs/estado/lecciones.md`, comentarios y scripts): con el enfoque de proyecto personal y sin datos personales; las preguntas de cada fase son "preguntas de repaso".
+- Capturas reales sin datos personales en `assets/` y diagrama de arquitectura.
+- `README.md` (inglés) y `README.es.md` (español): qué hace, demo, problema, solución, cómo funciona, decisiones clave, resultados, limitaciones y siguientes pasos, qué aprendí y cómo ejecutarlo.
+- Licencia MIT.
+
+**Conceptos:** por qué un pegado no trae el valor anterior y cómo se arregla guardando estado propio; qué hace que un README funcione para alguien de negocio; licencias de código abierto.
+**Romper a propósito:** pegar una columna entera de estados y comprobar que no sale ningún aviso.
+**Hecho cuando:** el pegado ya no reenvía avisos en producción, todos los archivos que vayan a ser públicos están limpios (enfoque de proyecto personal, sin datos personales), y el README (en los dos idiomas) explica el proyecto con capturas reales sin datos personales.
+
+### Fase 6b · Historial limpio y repo público
+
+- Copia de seguridad del repo antes de tocar nada.
+- Reescribir el historial con los textos limpios y sin las notas de trabajo (`bitacora.md`, `progreso.md`, `proximo-encargo.md` salen del repo y de su historial, pero se quedan en la carpeta local).
+- Revisar que no haya secretos en ningún commit y que todos usen el email noreply.
+- Publicar en un repo nuevo y público, y reconectar Render a él.
+
+**Hecho cuando:** el repo público tiene toda la historia de commits con textos limpios, sin secretos ni notas de trabajo, y producción sigue funcionando desplegada desde él.
+
+### Fase 6c · Vídeos, difusión y método (chat principal)
+
+- Vídeo de demo de 1-2 minutos (y un teaser corto opcional).
 - Texto para publicar el proyecto.
-- Ensayo: contar el proyecto en 2 minutos y responder las preguntas de repaso de todas las fases.
+- Repaso final: contar el proyecto en 2 minutos y responder las preguntas de repaso de todas las fases.
+- Dos documentos para futuros proyectos: la guía de método para proyectos guiados con IA y un checklist de lecciones para construir cualquier proyecto con IA.
 
 ---
 
