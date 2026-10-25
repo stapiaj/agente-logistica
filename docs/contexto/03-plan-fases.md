@@ -131,6 +131,8 @@ Cada fase se hace en su propia rama y termina con algo que funciona, una explica
 **Romper a propósito:** borrar una variable de entorno en Render y leer el error en los logs.
 **Preguntas de repaso:** ¿qué harías para que esto aguantara 10.000 envíos al día? ¿Cómo lo monitorizarías?
 
+**Lo que cambió al hacerla (2026-10-24/25):** se añadió el **segundo canal de avisos** (email al responsable si Telegram falla, decisión del chat principal tras la 3b) y una **comprobación de la configuración al arrancar** (línea `[startup]`; sin lo imprescindible el servidor no arranca). Durante la fase, Render despliega la rama `fase-5-deploy`; al fusionar el PR pasa a `main`. Roturas extra del encargo: `WEBHOOK_SECRET` distinto en el script y en Render, y `chat_id` de Telegram erróneo para ver el segundo canal. Hallazgo en producción: pegar "retrasado" sobre "retrasado" en la hoja reenvía el aviso (Google no da el valor anterior al pegar).
+
 ---
 
 ## Fase 6 · Presentación

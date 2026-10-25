@@ -5,7 +5,7 @@
 ```mermaid
 flowchart TD
     S["Google Sheet<br/>(sistema logístico simulado)"] -- "webhook (Apps Script, activador instalable)<br/>cuando status pasa a retrasado<br/>X-Webhook-Secret + {shipment_id, event_id}" --> API
-    subgraph Render["Servicio en la nube (Render)"]
+    subgraph Render["Servicio en la nube (Render, plan Free, Frankfurt)"]
         API["API FastAPI<br/>POST /webhook/shipment-delayed"] --> C1{"¿secreto?"}
         C1 -- no --> R401["401"]
         C1 -- sí --> C2{"¿cuerpo válido?"}
@@ -18,7 +18,7 @@ flowchart TD
     end
     AG --> T1["get_shipment<br/>lee envío y cliente"]
     AG --> T2["send_customer_email<br/>Resend + Idempotency-Key"]
-    AG --> T3["notify_human<br/>bot de Telegram"]
+    AG --> T3["notify_human<br/>bot de Telegram<br/>si falla: email al responsable (ALERT_EMAIL_TO)"]
     AG --> T4["log_action<br/>hoja log_acciones"]
     T1 -.-> S
     T4 -.-> S
@@ -31,25 +31,35 @@ flowchart TD
 2. Un **Apps Script** (`apps_script/webhook.gs`, activador **instalable**: el `onEdit` simple no puede llamar a URLs externas) envía un **webhook**: POST con JSON `{shipment_id, event_id}` y el secreto compartido en la cabecera `X-Webhook-Secret`. El `event_id` es único por cada cambio a `retrasado` y se reutiliza en los reintentos de ese mismo aviso.
 3. La **API** comprueba, en este orden: el secreto (`compare_digest`; si falta o no coincide → `401`), el cuerpo con pydantic (→ `422`) y si el `event_id` ya llegó antes (→ `200 already_processed`, sin agente). Si no puede comprobarlo porque la hoja no responde → `503` y tampoco ejecuta el agente.
 4. Si el aviso es nuevo, lo apunta en la pestaña `eventos` y responde **`202 accepted` al momento**: quien avisa no espera al agente (tarda segundos) ni reintenta por un timeout.
-5. En **segundo plano** (`BackgroundTasks`, un agente cada vez), el **agente** (LLM con herramientas) consulta el envío y el cliente, aplica las reglas, envía el email (con clave de idempotencia de Resend derivada del `event_id`), escala si hace falta y registra la acción. Después, el **guardarraíl** comprueba que no falte nada. El resultado va a la hoja, al email y a Telegram, no a quien avisó.
+5. En **segundo plano** (`BackgroundTasks`, un agente cada vez), el **agente** (LLM con herramientas) consulta el envío y el cliente, aplica las reglas, envía el email (con clave de idempotencia de Resend derivada del `event_id`), escala si hace falta y registra la acción. Después, el **guardarraíl** comprueba que no falte nada. El resultado va a la hoja, al email y a Telegram, no a quien avisó. Si Telegram no entrega un aviso al responsable, el mismo aviso sale por email a `ALERT_EMAIL_TO` (segundo canal); si también falla, el guardarraíl reintenta una vez y deja una fila `error` en el log como último recurso.
 6. Si la API no responde o devuelve `503`/5xx, el script de la hoja reintenta (hasta 3 veces, 5 s y 10 s) **con el mismo `event_id`**: reintentar es seguro porque la API es idempotente. Con `401`/`422` no reintenta (no se arreglaría solo).
 
 ## Componentes y stack
 
 | Pieza | Tecnología | Papel |
 |---|---|---|
-| Lenguaje | Python 3.11+ | Todo el backend |
+| Lenguaje | Python 3.13 (fijado con `.python-version`, el mismo en local y en Render) | Todo el backend |
 | API | FastAPI + Uvicorn | Recibe webhooks |
 | LLM | Gemini API (modelo Flash, plan gratuito) vía SDK `google-genai` | Cerebro del agente con tool calling |
 | Datos | Google Sheets + API (librería `gspread`, cuenta de servicio) | Simula el TMS/ERP del cliente |
 | Disparador | Google Apps Script | Envía el webhook |
 | Email | Resend (plan gratuito) | Comunicación con el cliente |
-| Escalado | Bot de Telegram (API HTTP) | Aviso al responsable humano |
-| Configuración | `python-dotenv` + `.env` | Secretos y ajustes |
+| Escalado | Bot de Telegram (API HTTP) + email de respaldo (Resend) | Aviso al responsable humano |
+| Configuración | `.env` + `python-dotenv` en local; variables de entorno y archivo secreto en Render | Secretos y ajustes |
 | Despliegue | Render (web service gratuito) | Servicio público |
 | Código | Git + GitHub | Versionado y revisión (rama + PR por fase) |
 
-Todo es gratuito. Limitaciones conocidas: Render gratuito se "duerme" tras ~15 min sin uso (la primera petición tarda); Resend sin dominio propio solo envía al email propio; en el plan gratuito de Gemini, Google puede usar los datos, así que solo usamos datos inventados.
+Todo es gratuito. Limitaciones conocidas: Render gratuito se "duerme" tras ~15 min sin tráfico de fuera y tarda unos 50 s o más en despertar; tiene 750 h/mes por workspace, borra el disco al redesplegar, reiniciar o dormirse y puede reiniciar el servicio cuando quiera (un agente a medias se perdería: límite de `BackgroundTasks`); Resend sin dominio propio solo envía al email propio; en el plan gratuito de Gemini, Google puede usar los datos, así que solo usamos datos inventados; la cuota diaria de Gemini es el límite real de volumen (respaldo de modelos en cadena). En la hoja, **pegar** un estado no da el valor anterior, así que pegar "retrasado" sobre "retrasado" reenvía el aviso (y el email): escribirlo a mano no.
+
+## Despliegue (Render)
+
+- **Servicio:** web service del plan Free en Frankfurt (la región más cercana), conectado a GitHub con acceso **solo a este repo**. Build: `pip install -r requirements.txt`. Arranque: `uvicorn app.main:app --host 0.0.0.0 --port $PORT` (`0.0.0.0` acepta llamadas de fuera de la máquina, `127.0.0.1` solo de sí misma; el puerto lo da Render en `PORT`). Python fijado con `.python-version`. URL: `https://agente-logistica.onrender.com`.
+- **Health check:** Render llama a `GET /health` cada pocos segundos desde su red interna; si deja de responder 200, lo da por caído. Esas llamadas no cuentan como tráfico y no impiden que se duerma.
+- **Configuración:** en Render no hay `.env` (Git lo ignora). Las variables se ponen en el panel (**Environment**) y la clave JSON de la cuenta de servicio como **archivo secreto**, que Render deja en `/etc/secrets/service_account.json` (`GOOGLE_SERVICE_ACCOUNT_FILE` apunta ahí). Regla común a local y nube: gana lo que ya está en el entorno del proceso; `load_dotenv()` solo rellena huecos y nunca pisa. Por eso el `.env` local puede seguir en modo `simulated` y Render en modo real sin pisarse. `PYTHONUNBUFFERED=1` para que los `print` lleguen a los logs al momento.
+- **Secretos por entorno:** el `WEBHOOK_SECRET` de producción es distinto del local; está en Render y en las Propiedades del script de la hoja. `EMAIL_ALLOW_REAL_RECIPIENTS` no se pone: el modo pruebas sigue cerrado en producción.
+- **Comprobación al arrancar:** `config.startup_report()` revisa toda la configuración imprescindible (Gemini, hoja y archivo de la clave, Resend, Telegram) y escribe una línea `[startup] DATA_SOURCE=… key_file=found EMAIL_MODE=… NOTIFY_MODE=… ALERT_EMAIL_TO=set`, sin valores. Si falta algo, el servidor no arranca: el despliegue falla, el error se lee en los logs y Render mantiene la versión anterior.
+- **Despliegue continuo:** Auto-Deploy "On Commit". Durante una fase, Render despliega la rama de la fase; al fusionar el PR, la rama de Render pasa a `main` y cada merge a `main` despliega.
+- **Logs:** pestaña **Logs** de Render. Las líneas `==>` son de Render (build, arranque, `Exited with status 1`); las que llevan la etiqueta de la instancia son de nuestro código (`[startup]`, `[webhook]`, `[agent]`, `[EMAIL …]`, `[LOG]`, `[FALLBACK]`). Para diagnosticar: ir al final, buscar el primer error y leer las líneas de la instancia de alrededor; filtrar por `[agent]` o `webhook` quita el ruido de los health checks.
 
 ## Estructura de carpetas (objetivo)
 
@@ -76,6 +86,7 @@ Agente-logistica/
 │   └── estado/            # Estado vivo: progreso.md y bitacora.md
 ├── .env.example
 ├── .gitignore
+├── .python-version        # Versión de Python que usa Render (la misma que en local)
 ├── requirements.txt
 └── README.md
 ```
@@ -97,3 +108,6 @@ Agente-logistica/
 - **Idempotencia en dos niveles:** un aviso puede llegar dos veces (reintentos, el servicio despertando en Render). (1) La API no procesa dos veces el mismo `event_id`: lo busca en memoria (frena dos avisos idénticos a la vez) y en la pestaña `eventos` (sobrevive a los reinicios de Render; la memoria y el disco se borran); con `DATA_SOURCE=memory`, solo memoria. Se apunta **al recibirlo**: como mucho una vez; si el agente falla a mitad, un reintento no lo repite y lo revisa un humano (un email duplicado es peor que un caso pendiente). (2) El email lleva `Idempotency-Key: shipment-delayed/<event_id>`: Resend no reenvía la misma clave en 24 h (y con otro contenido da `409` y no envía). Cubre lo que (1) no ve: el modelo llamando dos veces a la herramienta o un reproceso manual.
 - **Ante la duda, no actuar (503):** si la hoja no responde no se puede saber si el aviso está repetido; mejor tarde (quien avisa reintenta) que un email duplicado.
 - **Registro de cada acción:** trazabilidad y auditoría, imprescindibles para que un cliente confíe en el agente.
+- **Dos canales para avisar al humano:** si Telegram falla, `deliver_alert` (el único punto por el que pasan todos los avisos, del agente y del guardarraíl) envía el mismo aviso por email a `ALERT_EMAIL_TO`. El log solo no basta como respaldo: nadie lo mira. El email de aviso no cuenta como email al cliente (el guardarraíl no lo confunde) y no lleva clave de idempotencia (un aviso duplicado es una molestia, no un daño). Cada uso del respaldo deja una fila `guardrail` para medir cuánto falla Telegram.
+- **Comprobar la configuración al arrancar:** en la nube no hay terminal; un fallo de configuración debe verse en el despliegue, no con el primer aviso de un cliente. Falla cerrado, como el secreto del webhook.
+- **Un secreto por entorno:** si se filtra el de pruebas, la URL pública no queda abierta.
