@@ -10,7 +10,11 @@ Proyecto personal: quería llevar un agente de IA de la idea a producción, con 
 
 ## Demo
 
-> Vídeo de demo: próximamente.
+### Cómo funciona, en 99 segundos
+
+[![El viaje de un retraso: vídeo explicativo animado (clic para verlo)](assets/viaje-poster.jpg)](assets/viaje.mp4)
+
+Un retraso recorre todos los módulos del sistema, uno a uno. El vídeo está hecho en HTML y exportado a MP4; el código fuente está en [`video/`](video/). Música: Sascha Ende ([ende.app](https://ende.app/en)), CC BY 4.0.
 
 | 1. Alguien marca un envío como `retrasado` en la hoja logística | 2. El cliente recibe un email |
 |---|---|

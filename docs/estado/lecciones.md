@@ -32,6 +32,7 @@
 - 2026-10-25 · [planificación] Desplegar la rama de la fase y cambiar a `main` al fusionar → se pudo probar en producción sin romper "un PR por fase". Mantenerlo.
 - 2026-10-25 · [aprendizaje] Ante un resultado inesperado en producción (el email del pegado), pedir pruebas (logs, ejecuciones) antes de explicar → el diagnóstico salió de los datos y apareció un límite real del diseño.
 - 2026-10-25 · [chats-IA] Antes de pedir a Sergio que pegue el script de Apps Script, Claude lo probó con un "Google falso" en Node (hoja, propiedades y `UrlFetchApp` simulados, 8 casos) → el código llegó a producción sin fallos a la primera. Mantenerlo para todo código que solo corre en un servicio externo.
+- 2026-10-25 · [git] Reescribir el historial: ensayo completo en un clon de usar y tirar antes de la ejecución real → el ensayo descubrió que `filter-repo` no admite comentarios en el archivo de sustituciones (los habría convertido en `***REMOVED***`), y la ejecución real dio la misma huella final. Ensayar siempre una operación irreversible en una copia.
 - 2026-10-25 · [aprendizaje] Sergio pidió explicar la rotura en vez de ejecutarla cuando el resultado se deduce del código y de pruebas ya hechas → romper a propósito sirve cuando hay algo que descubrir; si no, explicarla con predicción y dejar la prueba en vivo como opcional.
 
 ## A mejorar
@@ -61,3 +62,4 @@
 - 2026-10-24 · [chats-IA] Claude dio una falsa alarma (diff de archivo entero) porque su terminal no traduce CRLF/LF como el Git de Windows de Sergio → antes de alarmar por un diff, compararlo con `--ignore-cr-at-eol` o `core.autocrlf=true`.
 - 2026-10-25 · [planificación] La rotura 3 (canal de avisos en Render) se quedó sin ejecutar por tiempo y cuota → planificar las roturas que gastan LLM al principio del cierre, o probarlas antes sin LLM, y reservar cuota para el cierre.
 - 2026-10-25 · [producto] El enfoque público ("proyecto de aprendizaje por iniciativa propia") se decidió en el chat principal y Sergio lo cambió al ver el texto ("proyecto personal") → decidir el posicionamiento enseñando la frase real que se va a publicar, no una etiqueta abstracta.
+- 2026-10-25 · [aprendizaje] En una fase de operación (publicar, reconectar servicios) Sergio no quiso rotura ni preguntas técnicas: le interesaba el resultado, no el mecanismo de Git → en fases de operación, cierre ligero (resumen en lenguaje de negocio y comprobaciones) y reservar roturas y preguntas para las fases que construyen algo.

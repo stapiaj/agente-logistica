@@ -10,7 +10,11 @@ A personal project: I wanted to take an AI agent from idea to production, with r
 
 ## Demo
 
-> Demo video: coming soon.
+### How it works, in 99 seconds
+
+[![El viaje de un retraso: animated explainer (click to play)](assets/viaje-poster.jpg)](assets/viaje.mp4)
+
+An animated walk-through of one delayed shipment across every module (on-screen text in Spanish). It is built in HTML and exported to MP4; the source is in [`video/`](video/). Music: Sascha Ende ([ende.app](https://ende.app/en)), CC BY 4.0.
 
 | 1. Someone marks a shipment as `retrasado` (delayed) in the logistics sheet | 2. The customer gets an email |
 |---|---|

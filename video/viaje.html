@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<title>El viaje de un retraso</title>
+<!--
+  EL VIAJE DE UN RETRASO · HTML motion graphics (on-screen text in Spanish)
+  - Open in a browser to play it (autoplay; space = pause, arrows = ±5 s, click = restart).
+  - To edit: texts in CAPTIONS, BUBBLES, PANELS and CHIPS; times in seconds; camera in CAM.
+  - To export to MP4: python render.py  (see README.md)
+-->
+<style>
+  :root{--bg:#0A0D14;--ink:#EEF1F6;--muted:#8792A6;--line:#252E42;--amber:#F5A623}
+  html,body{margin:0;background:#000;overflow:hidden;font-family:Inter,"Segoe UI",system-ui,sans-serif}
+  #frame{position:absolute;left:0;top:0;width:1920px;height:1080px;background:var(--bg);overflow:hidden;transform-origin:0 0}
+  svg{position:absolute;inset:0}
+  #ov{position:absolute;inset:0;pointer-events:none}
+  .bubble{position:absolute;background:#F4F6FA;color:#0A0D14;font-weight:650;font-size:34px;line-height:1.25;padding:20px 28px;border-radius:22px;white-space:nowrap;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+  .code{display:inline-block;font-family:"JetBrains Mono","DejaVu Sans Mono",Consolas,monospace;font-weight:700;font-size:28px;color:#fff;padding:3px 12px;border-radius:10px;margin-right:12px;vertical-align:2px}
+  .panel{position:absolute;background:rgba(17,22,34,.94);border:1.5px solid #2A3550;border-radius:20px;padding:22px 28px;font-family:"JetBrains Mono","DejaVu Sans Mono",Consolas,monospace;font-size:27px;color:var(--ink);box-shadow:0 18px 50px rgba(0,0,0,.45);white-space:nowrap}
+  .panel .ln{height:42px;line-height:42px}
+  .panel .ln.dim{color:var(--muted)}
+  .panel h6{margin:0 0 10px;font-family:Inter,sans-serif;font-size:18px;letter-spacing:2.5px;color:var(--muted);font-weight:700}
+  .chip{position:absolute;font-size:24px;font-weight:650;color:var(--ink);background:#141A28;border:1.5px solid #2E3A55;padding:10px 18px;border-radius:999px;white-space:nowrap}
+  .chip.mono{font-family:"JetBrains Mono","DejaVu Sans Mono",Consolas,monospace;font-size:21px}
+  .chip .ok{color:#2EBD85;margin-left:10px}
+  #cap{position:absolute;left:0;right:0;bottom:58px;text-align:center;color:var(--ink);font-size:38px;font-weight:550;letter-spacing:-.2px}
+  #shade{position:absolute;left:0;right:0;bottom:0;height:230px;background:linear-gradient(transparent,rgba(10,13,20,.92))}
+  #kicker{position:absolute;left:72px;top:58px;color:var(--ink);font-size:22px;font-weight:700;letter-spacing:3px}
+  #kicker b{color:var(--amber);margin-right:18px}
+  #kicker span{display:block;margin-top:8px;color:var(--muted);font-weight:500;letter-spacing:.5px;font-size:20px;font-family:"JetBrains Mono","DejaVu Sans Mono",Consolas,monospace}
+  #title{position:absolute;left:0;right:0;top:64px;text-align:center;color:var(--ink)}
+  #title h1{margin:0;font-family:"Inter Display",Inter,sans-serif;font-weight:800;font-size:72px;letter-spacing:-1.5px}
+  #title h1 b{color:var(--amber)}
+  #title p{margin:8px 0 0;font-size:28px;color:var(--muted);font-weight:500}
+  #outro{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--ink)}
+  #outro h2{margin:0;font-family:"Inter Display",Inter,sans-serif;font-weight:800;font-size:92px;letter-spacing:-2px;line-height:1.08;text-align:center}
+  #outro h2 b{color:var(--amber)}
+  #outro p{margin:38px 0 0;font-size:30px;color:var(--muted);font-family:"JetBrains Mono","DejaVu Sans Mono",Consolas,monospace}
+  #bar{position:absolute;left:0;bottom:0;height:4px;background:var(--amber);opacity:.8}
+</style></head>
+<body>
+<div id="frame">
+  <svg id="svg" width="1920" height="1080" viewBox="0 0 1920 1080"></svg>
+  <div id="ov"></div>
+  <div id="bar"></div>
+</div>
+<script>
+// ============================================================ EDITABLE DATA
+const DURATION = 99;
+const AMBER = '#F5A623';
+
+const N = { // modules: map position, colour, name and role
+  hoja:      {x:220,  y:430, c:'#34C77B', name:'Google Sheets', tech:'datos de envíos'},
+  vigia:     {x:520,  y:430, c:'#A78BFA', name:'Apps Script', tech:'detecta cambios'},
+  portero:   {x:860,  y:430, c:'#4C8DFF', name:'FastAPI', tech:'recibe el webhook'},
+  archivera: {x:1160, y:430, c:'#F472B6', name:'Registro de eventos', tech:'evita duplicados'},
+  gestor:    {x:1460, y:430, c:'#22D3EE', name:'Agente IA', tech:'Gemini · herramientas'},
+  inspectora:{x:1460, y:770, c:'#F87171', name:'Reglas', tech:'rules.py · guardarraíl'},
+  cartero:   {x:1745, y:230, c:'#2DD4BF', name:'Resend', tech:'email al cliente'},
+  heraldo:   {x:1745, y:500, c:'#38BDF8', name:'Telegram', tech:'aviso al responsable'},
+  cronista:  {x:1745, y:770, c:'#A3E635', name:'Log de acciones', tech:'hoja log_acciones'},
+};
+const ZONES = [[100,150,540,580,'GOOGLE'],[735,150,850,810,'SERVIDOR · RENDER'],[1625,90,240,870,'FUERA']];
+const EDGES = { // [a, b, time windows where the edge lights up]
+  e1:['hoja','vigia',[[7.4,11.2],[76.2,77.6]]],
+  e2:['vigia','portero',[[11.0,15.2],[77.0,78.6]]],
+  e3:['portero','archivera',[[17.6,19.0],[78.0,79.4]]],
+  e4:['archivera','gestor',[[33.4,37.6],[79.0,80.8]]],
+  e5:['gestor','inspectora',[[52.4,56.4],[81.2,84.2]]],
+  e6:['gestor','cartero',[[63.0,65.0]]],
+  e7:['gestor','heraldo',[[63.8,65.8],[85.8,87.9]]],
+  e8:['gestor','cronista',[[64.6,66.6]]],
+};
+// Camera: [second, centre x, centre y, zoom]
+const CAM = [[0,982,525,.8],[4.2,982,525,.8],[6.0,370,500,2.1],[13.0,370,500,2.1],[15.0,860,470,3.0],[25.5,860,470,3.0],
+  [27.0,1160,470,3.0],[35.5,1160,470,3.0],[37.0,1430,470,2.4],[49.0,1430,470,2.4],[50.5,1460,640,1.5],[61.5,1460,640,1.5],
+  [63.0,1620,560,1.2],[73.5,1620,560,1.2],[75.5,982,525,.8],[80.0,982,525,.8],[81.5,1580,600,1.25],[89.5,1580,600,1.25],
+  [91.5,982,525,.8],[999,982,525,.8]];
+const FOCUS = [ // [from, to, modules in focus] (the rest are dimmed)
+  [5,14.6,['hoja','vigia']],[14.6,25.5,['portero']],[25.5,36,['archivera']],[36,49.6,['gestor']],
+  [49.6,62.5,['gestor','inspectora']],[62.5,74.5,['gestor','cartero','heraldo','cronista']],[81,91.2,['gestor','inspectora','heraldo','cartero']]];
+const CHAPTERS = [[5,14.6,'01','GOOGLE SHEETS Y APPS SCRIPT','detección del cambio'],[14.6,25.5,'02','FASTAPI','webhook · autenticación'],
+  [25.5,36,'03','REGISTRO DE EVENTOS','idempotencia'],[36,49.6,'04','AGENTE IA','Gemini · modelos de respaldo'],
+  [49.6,62.5,'05','REGLAS','rules.py · guardarraíl'],[62.5,74.5,'06','SALIDAS','Resend · Telegram · log'],
+  [74.5,91.2,'07','SEGUNDO VIAJE','criterio con red']];
+const CAPTIONS = [
+  [0.6,4.6,'Cada módulo del sistema tiene un trabajo. Sigamos un aviso de principio a fin.'],
+  [5.0,9.6,'En Google Sheets, alguien marca el envío ENV-1002 como retrasado.'],
+  [9.6,14.6,'Apps Script detecta el cambio, comprueba que no lo había avisado ya y envía el webhook.'],
+  [14.6,19.4,'FastAPI comprueba la contraseña y responde al momento: 202. El trabajo sigue en segundo plano.'],
+  [19.4,25.5,'Un aviso sin contraseña se queda fuera: 401.'],
+  [25.5,29.8,'El registro de eventos apunta cada aviso con su identificador.'],
+  [29.8,36.0,'Si el mismo aviso llega dos veces, se procesa una sola vez.'],
+  [36.0,43.2,'El agente lee el caso, razona y usa herramientas.'],
+  [43.2,49.6,'Si se queda sin cuota, un modelo de respaldo toma el relevo.'],
+  [49.6,56.6,'Las reglas viven en código y revisan cada decisión del agente.'],
+  [56.6,62.5,'Aunque el prompt diga otra cosa, la regla manda.'],
+  [62.5,68.5,'Resend envía el email al cliente y Telegram avisa a la responsable.'],
+  [68.5,74.5,'Cada acción queda registrada en el log.'],
+  [74.5,81.0,'Segundo viaje: ENV-1006. Han robado el camión, pero el retraso es de solo 6 h.'],
+  [81.0,86.2,'Ninguna regla cubre el caso, y el agente no improvisa.'],
+  [86.2,91.2,'Escala por criterio y deja a la responsable un borrador sin enviar.'],
+];
+const C = (bg,txt)=>`<span class="code" style="background:${bg}">${txt}</span>`;
+const BUBBLES = [ // [module, from, to, html, position: top | right]
+  ['vigia',7.8,9.6,'ENV-1002 ha cambiado.','top'],
+  ['vigia',9.6,11.8,'¿Ya avisé de este? No. Escribo la carta.','top'],
+  ['portero',15.4,16.4,'¿Contraseña?','top'],
+  ['portero',17.0,19.2,C('#2EBD85','202')+'Recibido. Ya me encargo.','top'],
+  ['portero',20.5,21.2,'¿Contraseña?','top'],
+  ['portero',21.3,23.2,C('#E5484D','401')+'Sin contraseña no entras.','top'],
+  ['archivera',27.6,29.6,'Apuntado: '+C('#B83E7F','evt-ENV-1002-…'),'top'],
+  ['archivera',31.0,33.2,'Esta ya la tenemos. Se trabaja una vez.','top'],
+  ['gestor',43.4,45.2,C('#E5484D','429')+'Me he quedado sin cuota.','top'],
+  ['gestor',45.6,47.8,'Te cubro. Sigo yo.'+' '+C('#0E7490','respaldo'),'top'],
+  ['gestor',50.8,53.0,'Propongo: email al cliente y aviso.','right'],
+  ['gestor',56.8,58.6,'¿Y si el prompt dice «envía siempre»?','right'],
+  ['inspectora',58.6,61.2,'La regla manda. Buzón cerrado.','right'],
+  ['inspectora',81.8,84.0,'Ninguna regla aplica: solo 6 h.','right'],
+  ['gestor',84.0,86.4,'Pero sin camión no hay entrega. No decido solo.','right'],
+];
+const PANELS = [ // [module, from, to, title, lines [appear at second, text, dimmed?]]
+  ['gestor',37.8,43.0,'PENSANDO',[[37.8,'get_shipment("ENV-1002")'],[38.8,'→ 30 h de retraso · email válido',1],[39.8,'check_rules()'],[40.8,'→ enviar email · escalar (> 24 h)',1]]],
+  ['inspectora',53.4,56.4,'REGLAS',[[53.6,'✓ retraso > 24 h → escalar'],[54.4,'✓ email válido → enviar'],[55.2,'aprobado',1]]],
+];
+const CHIPS = [ // [module, from, to, html, mono?]
+  ['cartero',65.0,73.6,'Email al cliente<span class="ok">✓</span>'],
+  ['heraldo',65.8,73.6,'Aviso a la responsable<span class="ok">✓</span>'],
+  ['cronista',66.6,73.6,'escalated · regla > 24 h',1],
+  ['heraldo',87.4,90.6,'<span style="color:#F5A623">Borrador · NO enviado</span>'],
+  ['cartero',87.8,90.6,'<span style="color:#8792A6">Sin email al cliente</span>'],
+];
+
+// ============================================================ ENGINE
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const ease=p=>p<.5?4*p*p*p:1-Math.pow(-2*p+2,3)/2;
+const out=p=>1-Math.pow(1-p,3);
+const prog=(t,a,b)=>ease(clamp((t-a)/(b-a)));
+const lerp=(a,b,p)=>a+(b-a)*p;
+const win=(t,a,b,f=.25)=>clamp((t-a)/f)*clamp((b-t)/f);
+const inW=(t,ws)=>ws.some(([a,b])=>t>=a&&t<=b);
+
+function cam(t){
+  for(let i=0;i<CAM.length-1;i++){const [t0,x0,y0,s0]=CAM[i],[t1,x1,y1,s1]=CAM[i+1];
+    if(t>=t0&&t<=t1){const p=ease((t-t0)/(t1-t0));
+      return {x:lerp(x0,x1,p),y:lerp(y0,y1,p),s:Math.exp(lerp(Math.log(s0),Math.log(s1),p))};}}
+  const l=CAM[CAM.length-1]; return {x:l[1],y:l[2],s:l[3]};
+}
+function bez(A,B,p){ // same curve as the edges between modules
+  const P0=[A[0],A[1]],P1=[A[0]+150,A[1]],P2=[B[0]-150,B[1]],P3=[B[0],B[1]],q=1-p;
+  return [q*q*q*P0[0]+3*q*q*p*P1[0]+3*q*p*p*P2[0]+p*p*p*P3[0], q*q*q*P0[1]+3*q*q*p*P1[1]+3*q*p*p*P2[1]+p*p*p*P3[1]];
+}
+// packet segments: [t0,t1,x0,y0,x1,y1] (straight) or [t0,t1,'bez',A,B]
+function along(t,segs){
+  for(const s of segs){ if(t>=s[0]&&t<=s[1]){const p=prog(t,s[0],s[1]);
+    if(s[2]==='bez') return bez(s[3],s[4],p);
+    return [lerp(s[2],s[4],p),lerp(s[3],s[5],p)];}}
+  return null;
+}
+function packets(t){
+  const P=[];
+  // main message ENV-1002
+  if(t>=11.0&&t<37.6){
+    const pos=along(t,[[11.0,12.6,615,430,615,430],[12.6,15.0,615,430,740,430],[15.0,17.8,740,430,740,430],[17.8,18.8,740,430,1070,430],
+      [18.8,33.6,1070,430,1070,430],[33.6,35.4,1070,430,1370,430],[35.4,37.0,1370,430,1370,430],[37.0,37.6,1370,430,1460,430]]);
+    P.push({x:pos[0],y:pos[1],kind:'mail',key:1,op:clamp((t-11)/.35),pop:out(clamp((t-11)/.4)),stamp:out(clamp((t-28.0)/.3)),glow:win(t,16.3,17.1,.2)});
+  }
+  if(t>=19.6&&t<=22.8){ // impostor (no secret)
+    let x,y=430,op=1;
+    if(t<20.4) x=lerp(560,740,prog(t,19.6,20.4));
+    else if(t<22.0){x=740; if(t>21.3&&t<21.7) x+=Math.sin((t-21.3)*60)*6;}
+    else {const p=prog(t,22.0,22.8); x=lerp(740,600,p); y=430-Math.sin(p*Math.PI)*40; op=1-p;}
+    P.push({x,y,kind:'bad',op});
+  }
+  if(t>=30.0&&t<=33.4){ // duplicate delivery
+    const x=lerp(960,1040,prog(t,30.0,30.8)); P.push({x,y:478,kind:'mail',key:1,op:clamp((t-30)/.3)*(1-prog(t,32.6,33.4)),stamp:1,dup:1});
+  }
+  const G=[1550,430];
+  const outs=[[63.2,64.6,'cartero','mail'],[64.0,65.4,'heraldo','alert'],[64.8,66.2,'cronista','note'],[86.0,87.6,'heraldo','draft']];
+  for(const [a,b,m,kind] of outs){ if(t>=a&&t<=b+.3){
+    const B=[N[m].x-90,N[m].y]; let pos;
+    if(t<=b) pos=bez(G,B,prog(t,a,b)); else pos=[lerp(B[0],N[m].x,prog(t,b,b+.3)),B[1]];
+    P.push({x:pos[0],y:pos[1],kind,op:1,key:kind==='mail'});
+  }}
+  if(t>=76.4&&t<=80.8){ const x=t<=80.4?lerp(310,1370,prog(t,76.4,80.4)):lerp(1370,1460,prog(t,80.4,80.8)); P.push({x,y:430,kind:'case2',op:1}); }
+  for(const [a,b] of [[52.6,53.4],[81.3,81.9]]) if(t>=a&&t<=b){P.push({x:1460,y:lerp(522,678,prog(t,a,b)),kind:'pulse',op:1});}
+  return P;
+}
+function pktSVG(e){
+  const sc=e.pop!==undefined?.6+.4*e.pop:1;
+  let s=`<g transform="translate(${e.x},${e.y}) scale(${sc})" opacity="${e.op}">`;
+  const env=(fill)=>`<rect x="-24" y="-16" width="48" height="32" rx="6" fill="${fill}"/><path d="M-22,-13 L0,3 L22,-13" fill="none" stroke="#0A0D14" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round" opacity=".5"/>`;
+  switch(e.kind){
+    case 'mail': s+=env(AMBER);
+      if(e.key){ s+=`<circle cx="18" cy="10" r="${11+(e.glow||0)*6}" fill="#FFF7E6" opacity="${.22+(e.glow||0)*.6}"/>
+        <g transform="translate(18,10)"><circle r="4.6" fill="none" stroke="#0A0D14" stroke-width="2.3"/><path d="M4.6,0 H11 M9,0 V3.6" stroke="#0A0D14" stroke-width="2.3" stroke-linecap="round"/></g>`;}
+      if(e.stamp) s+=`<g transform="translate(-18,-14) scale(${e.stamp})"><circle r="9" fill="#F472B6"/><path d="M-4,0 L-1,3 L4,-3" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></g>`;
+      break;
+    case 'bad': s+=env('#E5484D')+`<text x="17" y="15" font-size="17" font-weight="800" fill="#fff" text-anchor="middle">?</text>`; break;
+    case 'alert': s+=`<rect x="-22" y="-16" width="44" height="32" rx="9" fill="#38BDF8"/><path d="M-9,1 L9,-7 L3,8 L0,2 Z" fill="#0A0D14" opacity=".75"/>`; break;
+    case 'note': s+=`<rect x="-18" y="-22" width="36" height="44" rx="6" fill="#A3E635"/><path d="M-10,-10 H10 M-10,-2 H10 M-10,6 H4" stroke="#0A0D14" stroke-width="2.4" stroke-linecap="round" opacity=".6"/>`; break;
+    case 'draft': s+=`<rect x="-18" y="-22" width="36" height="44" rx="6" fill="#F4F6FA"/><path d="M-10,-10 H10 M-10,-2 H10 M-10,6 H4" stroke="#0A0D14" stroke-width="2.4" stroke-linecap="round" opacity=".45"/><rect x="-21" y="12" width="42" height="13" rx="4" fill="${AMBER}"/>`; break;
+    case 'case2': s+=env(AMBER)+`<circle cx="18" cy="-13" r="9" fill="#E5484D"/><text x="18" y="-8" font-size="14" font-weight="800" fill="#fff" text-anchor="middle">!</text>`; break;
+    case 'pulse': s+=`<circle r="9" fill="${AMBER}"/><circle r="16" fill="${AMBER}" opacity=".25"/>`; break;
+  }
+  return s+'</g>';
+}
+
+function icon(id){ // line icon in each card's corner
+  const st=`fill="none" stroke="#9AA6BA" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"`;
+  return ({
+    hoja:`<rect x="-7" y="-6" width="14" height="12" rx="2" ${st}/><path d="M-7,-1 H7 M-2,-6 V6" ${st}/>`,
+    vigia:`<path d="M-8,0 Q0,-8 8,0 Q0,8 -8,0 Z" ${st}/><circle r="2.4" ${st}/>`,
+    portero:`<path d="M0,-8 L7,-5 V1 Q7,6 0,8 Q-7,6 -7,1 V-5 Z" ${st}/>`,
+    archivera:`<rect x="-7" y="-7" width="14" height="5" rx="1.5" ${st}/><path d="M-6,-2 V7 H6 V-2 M-2,2 H2" ${st}/>`,
+    gestor:`<path d="M0,-8 L2,-2 L8,0 L2,2 L0,8 L-2,2 L-8,0 L-2,-2 Z" ${st}/>`,
+    inspectora:`<rect x="-7" y="-7" width="14" height="14" rx="3" ${st}/><path d="M-3,0 L-1,3 L4,-3" ${st}/>`,
+    cartero:`<rect x="-8" y="-5.5" width="16" height="11" rx="2" ${st}/><path d="M-7,-4 L0,1 L7,-4" ${st}/>`,
+    heraldo:`<path d="M-8,0 L8,-7 L3,8 L0,2 Z" ${st}/>`,
+    cronista:`<path d="M-6,7 L-5,3 L4,-6 L7,-3 L-2,6 Z" ${st}/>`,
+  })[id];
+}
+
+function talking(id,t){ return BUBBLES.some(([m,a,b])=>m===id&&t>=a&&t<=Math.min(b,a+Math.max(.6,(b-a)*.6))); }
+
+function glyph(id,n,t,look,o={}){
+  const bob=Math.sin(t*2.1+n.x*.013)*2;
+  const blink=((t+n.x*.0071)%4.1)<0.12?0.12:1;
+  let px=0,py=0;
+  if(look){const dx=look[0]-n.x-(o.dx||0), dy=look[1]-(n.y-4); const L=Math.hypot(dx,dy)||1; const k=clamp(L/60); px=dx/L*5.5*k; py=dy/L*4.5*k;}
+  const col=o.col||n.c;
+  let face='';
+  const tk=talking(id,t)&&!o.silent;
+  if(tk){const op=Math.abs(Math.sin(t*15)); face+=`<ellipse cx="0" cy="25" rx="8" ry="${2.5+op*6}" fill="#0A0D14"/>`;}
+  if(id==='portero'){
+    const angry=win(t,21.3,23.4,.2)*14;
+    if(angry>1) face+=`<path d="M-27,${-22-angry*.3} L-9,${-22+angry*.5}" stroke="#0A0D14" stroke-width="4.5" stroke-linecap="round"/><path d="M27,${-22-angry*.3} L9,${-22+angry*.5}" stroke="#0A0D14" stroke-width="4.5" stroke-linecap="round"/>`;
+    face+=`<path d="M-40,-32 Q0,-68 40,-32 Z" fill="#162033"/><rect x="-46" y="-36" width="92" height="9" rx="4.5" fill="#0D1420"/><circle cx="0" cy="-47" r="5" fill="${AMBER}"/>`;
+  }
+  if(id==='inspectora') face+=`<circle cx="-17" cy="-4" r="16" fill="none" stroke="#0A0D14" stroke-width="3.2"/><circle cx="17" cy="-4" r="16" fill="none" stroke="#0A0D14" stroke-width="3.2"/><path d="M-1,-4 H1" stroke="#0A0D14" stroke-width="3.2"/>`;
+  if(o.sweat) face+=`<path d="M38,-30 Q44,-20 38,-14 Q32,-20 38,-30 Z" fill="#BFE9F5" opacity="${o.sweat}"/>`;
+  let eyes;
+  if(o.worried) eyes=`<path d="M-28,2 Q-18,-8 -8,2 M8,2 Q18,-8 28,2" fill="none" stroke="#0A0D14" stroke-width="4.5" stroke-linecap="round"/>`;
+  else eyes=`<g transform="translate(0,-4) scale(1,${blink})"><ellipse cx="-17" cy="0" rx="12" ry="14" fill="#fff"/><ellipse cx="17" cy="0" rx="12" ry="14" fill="#fff"/>
+      <circle cx="${-17+px}" cy="${1+py}" r="6.5" fill="#0A0D14"/><circle cx="${17+px}" cy="${1+py}" r="6.5" fill="#0A0D14"/></g>`;
+  return `<g transform="translate(${o.dx||0},${bob+6})" opacity="${o.op===undefined?1:o.op}"><rect x="-50" y="-46" width="100" height="96" rx="40" fill="${col}"/>${eyes}${face}</g>`;
+}
+
+function focusOp(id,t){let o=1; for(const [a,b,ids] of FOCUS){ if(!ids.includes(id)) o=Math.min(o,1-.72*win(t,a,b,.6)); } return o;}
+function card(id,n,t,look){
+  let inner;
+  if(id==='gestor'){
+    const sw=prog(t,45.2,46.0)*(1-prog(t,49.0,49.8)); // hand-over to the fallback model
+    const sweat=win(t,43.4,45.4,.2);
+    inner=glyph(id,n,t,look,{dx:-130*sw,op:1-sw,worried:sweat>.5,sweat,silent:sw>.3})+
+      (sw>0?glyph(id,n,t,look,{dx:130*(1-sw),op:sw,col:'#7DD3FC',silent:sw<.3}):'');
+  } else inner=glyph(id,n,t,look);
+  return `<g transform="translate(${n.x},${n.y})" opacity="${focusOp(id,t)}">
+    <clipPath id="cl-${id}"><rect x="-90" y="-90" width="180" height="180" rx="38"/></clipPath>
+    <rect x="-90" y="-90" width="180" height="180" rx="38" fill="#10151F" stroke="${n.c}" stroke-opacity=".45" stroke-width="2"/>
+    <g clip-path="url(#cl-${id})">${inner}</g>
+    <g transform="translate(64,-64)">${icon(id)}</g>
+    <text y="126" text-anchor="middle" fill="#EEF1F6" font-size="23" font-weight="700">${n.name}</text>
+    <text y="153" text-anchor="middle" fill="#6F7A8E" font-size="16" font-family="JetBrains Mono, DejaVu Sans Mono, Consolas, monospace">${n.tech}</text>
+  </g>`;
+}
+
+function sheetPanel(t){ // the sheet with its rows (chapter 1)
+  const o=win(t,6.0,13.6,.5); if(o<=0) return '';
+  const flip=prog(t,7.4,7.8);
+  const rows=[['ENV-1001','en_transito','6'],['ENV-1002',null,'30'],['ENV-1003','en_transito','4']];
+  let s=`<g opacity="${o}" font-family="JetBrains Mono, DejaVu Sans Mono, Consolas, monospace" font-size="13">
+    <rect x="125" y="600" width="350" height="104" rx="12" fill="#121826" stroke="#2A3550" stroke-width="1.5"/>
+    <text x="142" y="624" fill="#6F7A8E">shipment_id</text><text x="262" y="624" fill="#6F7A8E">status</text><text x="400" y="624" fill="#6F7A8E">delay_h</text>`;
+  rows.forEach((r,i)=>{const y=650+i*22;
+    if(r[1]===null){
+      s+=`<rect x="252" y="${y-15}" width="118" height="20" rx="5" fill="${AMBER}" opacity="${flip*.22}"/>`;
+      s+=`<text x="262" y="${y}" fill="#C8D0DC" opacity="${1-flip}">en_transito</text><text x="262" y="${y}" fill="${AMBER}" font-weight="700" opacity="${flip}">retrasado</text>`;
+    } else s+=`<text x="262" y="${y}" fill="#C8D0DC">${r[1]}</text>`;
+    s+=`<text x="142" y="${y}" fill="#EEF1F6">${r[0]}</text><text x="400" y="${y}" fill="#C8D0DC">${r[2]}</text>`;});
+  return s+'</g>';
+}
+
+function render(t){
+  const c=cam(t), P=packets(t);
+  const S=(wx,wy)=>[(wx-c.x)*c.s+960,(wy-c.y)*c.s+540];
+  const mapOp=1-prog(t,91.5,92.5)*.85;
+  let w=`<defs><pattern id="dots" width="40" height="40" patternUnits="userSpaceOnUse"><circle cx="20" cy="20" r="1.4" fill="#182032"/></pattern></defs>
+    <rect x="-3000" y="-3000" width="8000" height="7000" fill="url(#dots)"/><g opacity="${mapOp}">`;
+  for(const [x,y,wd,h,l] of ZONES) w+=`<rect x="${x}" y="${y}" width="${wd}" height="${h}" rx="32" fill="#0D121C" stroke="#222B3E" stroke-dasharray="8 10" stroke-width="1.6"/>
+     <text x="${x+26}" y="${y+38}" fill="#4F5B73" font-size="17" font-weight="700" letter-spacing="2.5">${l}</text>`;
+  const outro=t>91.5&&t<99;
+  for(const k in EDGES){const [a,b,ws]=EDGES[k],A=N[a],B=N[b];
+    const on=inW(t,ws)||outro;
+    const d=(A.y===B.y||A.x===B.x)?`M${A.x},${A.y} L${B.x},${B.y}`:`M${A.x},${A.y} C${A.x+150},${A.y} ${B.x-150},${B.y} ${B.x},${B.y}`;
+    w+=`<path d="${d}" fill="none" stroke="#263049" stroke-width="2.5"/>`;
+    if(on) w+=`<path d="${d}" fill="none" stroke="${AMBER}" stroke-width="3.5" stroke-dasharray="10 12" stroke-dashoffset="${-t*44}" opacity=".9"/>`;
+  }
+  w+=`<text x="690" y="414" text-anchor="middle" fill="#6F7A8E" font-size="14" font-family="JetBrains Mono, DejaVu Sans Mono, Consolas, monospace">webhook</text>`;
+  w+=sheetPanel(t);
+  for(const p of P) w+=pktSVG(p);
+  for(const id in N){
+    const n=N[id]; let look=null,best=1e9;
+    for(const p of P){const d=Math.hypot(p.x-n.x,p.y-n.y); if(d<520&&d<best){best=d;look=[p.x,p.y];}}
+    if(id==='hoja'&&t>6&&t<9.5) look=[300,660];
+    if(id==='vigia'&&t>7&&t<9.8) look=[300,660];
+    if(id==='gestor'&&t>50.5&&t<62) look=[1460,770];
+    if(id==='inspectora'&&t>50.5&&t<62) look=[1460,430];
+    if(id==='inspectora'&&t>81.5&&t<86.5) look=[1460,430];
+    if(id==='gestor'&&t>81.5&&t<86) look=[1460,770];
+    w+=card(id,n,t,look);
+  }
+  // FastAPI gate
+  const op=prog(t,17.3,17.7)*(1-prog(t,19.0,19.3));
+  w+=`<g transform="translate(0,${-op*70})" opacity="${1-op*.85}"><rect x="765" y="394" width="10" height="72" rx="5" fill="#4C8DFF"/></g>`;
+  const ok=win(t,17.0,18.2,.15), ko=win(t,21.3,22.4,.15);
+  if(ok>0) w+=`<g transform="translate(740,388) scale(${.6+ok*.4})" opacity="${ok}"><circle r="14" fill="#2EBD85"/><path d="M-6,0 L-2,5 L7,-5" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/></g>`;
+  if(ko>0) w+=`<g transform="translate(740,388) scale(${.6+ko*.4})" opacity="${ko}"><circle r="14" fill="#E5484D"/><path d="M-5,-5 L5,5 M5,-5 L-5,5" stroke="#fff" stroke-width="3.6" stroke-linecap="round"/></g>`;
+  const lock=win(t,58.6,61.4,.2);
+  if(lock>0) w+=`<g transform="translate(1540,690) scale(${.7+.3*lock})" opacity="${lock}"><circle r="22" fill="#E5484D"/><rect x="-9" y="-3" width="18" height="13" rx="3" fill="#fff"/><path d="M-5.5,-3 V-7 A5.5,5.5 0 0 1 5.5,-7 V-3" fill="none" stroke="#fff" stroke-width="3"/></g>`;
+  w+='</g>';
+  document.getElementById('svg').innerHTML=`<rect width="1920" height="1080" fill="#0A0D14"/><g transform="translate(960,540) scale(${c.s}) translate(${-c.x},${-c.y})">${w}</g>`;
+
+  // ---------- text layer (fixed screen size)
+  let h='';
+  const ti=1-prog(t,3.6,4.3);
+  if(ti>0) h+=`<div id="title" style="opacity:${ti}"><h1>El viaje de un <b>retraso</b></h1><p>Un aviso recorre el Agente Logística, módulo a módulo</p></div>`;
+  for(const [a,b,num,name,tech] of CHAPTERS){const o=win(t,a,b,.4); if(o>0) h+=`<div id="kicker" style="opacity:${o}"><b>${num}</b>${name}<span>${tech}</span></div>`;}
+  for(const [m,a,b,html,pos] of BUBBLES){const o=win(t,a,b,.18); if(o<=0) continue; const n=N[m];
+    const sc=.9+.1*out(clamp((t-a)/.25));
+    if(pos==='top'){const [x,y]=S(n.x-30,n.y-96); h+=`<div class="bubble" style="left:${x}px;top:${y}px;opacity:${o};transform:translate(0,-100%) scale(${sc});transform-origin:0 100%">${html}</div>`;}
+    else {const [x,y]=S(n.x+96,n.y); h+=`<div class="bubble" style="left:${x+14}px;top:${y}px;opacity:${o};transform:translate(0,-50%) scale(${sc});transform-origin:0 50%">${html}</div>`;}
+  }
+  for(const [m,a,b,ttl,lines] of PANELS){const o=win(t,a,b,.25); if(o<=0) continue; const n=N[m]; const [x,y]=S(n.x+96,n.y);
+    let ls=''; for(const [la,txt,dim] of lines){const lo=clamp((t-la)/.3); ls+=`<div class="ln${dim?' dim':''}" style="opacity:${lo};transform:translateY(${(1-lo)*8}px)">${txt}</div>`;}
+    h+=`<div class="panel" style="left:${x+16}px;top:${y}px;opacity:${o};transform:translate(0,-50%)"><h6>${ttl}</h6>${ls}</div>`;}
+  for(const [m,a,b,html,mono] of CHIPS){const o=win(t,a,b,.25); if(o<=0) continue; const n=N[m]; const [x,y]=S(n.x+100,n.y);
+    h+=`<div class="chip${mono?' mono':''}" style="left:${x+14}px;top:${y}px;opacity:${o};transform:translate(0,-50%) scale(${.92+.08*o})">${html}</div>`;}
+  const c2=win(t,75.2,80.8,.3);
+  if(c2>0) h+=`<div class="chip" style="left:960px;top:150px;opacity:${c2};transform:translate(-50%,0);font-size:28px;padding:14px 26px;border-color:#E5484D">ENV-1006 · camión robado · <span style="color:#F5A623">6 h de retraso</span></div>`;
+  h+=`<div id="shade"></div>`;
+  for(const [a,b,txt] of CAPTIONS){const o=win(t,a,b,.3); if(o>0) h+=`<div id="cap" style="opacity:${o};transform:translateY(${(1-o)*6}px)">${txt}</div>`;}
+  const oo=win(t,92.3,DURATION+1,.6);
+  if(oo>0) h+=`<div id="outro" style="opacity:${oo}"><h2>El prompt orienta.<br><b>El código garantiza.</b></h2><p>github.com/stapiaj/agente-logistica</p></div>`;
+  document.getElementById('ov').innerHTML=h;
+  document.getElementById('bar').style.width=(RENDER?0:t/DURATION*1920)+'px';
+}
+
+// ============================================================ PLAYER
+const RENDER = new URLSearchParams(location.search).has('render');
+window.render=render;
+function fit(){const f=document.getElementById('frame'); if(RENDER){f.style.transform='none';return;}
+  const k=Math.min(innerWidth/1920,innerHeight/1080); f.style.transform=`translate(${(innerWidth-1920*k)/2}px,${(innerHeight-1080*k)/2}px) scale(${k})`;}
+addEventListener('resize',fit); fit();
+if(!RENDER){
+  let t0=performance.now(), paused=false, at=0;
+  addEventListener('keydown',e=>{ if(e.code==='Space'){paused=!paused; if(!paused) t0=performance.now()-at*1000;}
+    if(e.code==='ArrowRight'){at=Math.min(DURATION,at+5); t0=performance.now()-at*1000;}
+    if(e.code==='ArrowLeft'){at=Math.max(0,at-5); t0=performance.now()-at*1000;} });
+  addEventListener('click',()=>{at=0;t0=performance.now();paused=false;});
+  (function loop(now){ if(!paused){at=((now-t0)/1000)%DURATION;} render(at); requestAnimationFrame(loop); })(performance.now());
+} else render(0);
+</script>
+</body></html>
